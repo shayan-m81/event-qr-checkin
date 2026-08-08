@@ -1,0 +1,3 @@
+export const OFFLINE_CACHE_FRESHNESS_MS = 30 * 60 * 1_000;
+export const EXPECTED_SERVICE_WORKER_PATH = "/sw.js";
+export const SERVICE_WORKER_CHECK_TIMEOUT_MS = 3_000;

@@ -1,0 +1,5 @@
+ADMIN_ACCESS_CODE=replace-with-a-strong-admin-code
+PRIMARY_SCANNER_ACCESS_CODE=replace-with-a-distinct-primary-code
+SECONDARY_SCANNER_ACCESS_CODE=replace-with-a-distinct-secondary-code
+SESSION_SECRET=replace-with-at-least-32-random-bytes
+OFFLINE_GRANT_PRIVATE_KEY=replace-with-base64-pkcs8-p256-private-key

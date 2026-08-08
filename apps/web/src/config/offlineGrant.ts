@@ -1,0 +1,3 @@
+export const OFFLINE_GRANT_PUBLIC_KEY_SPKI = __OFFLINE_GRANT_PUBLIC_KEY_SPKI__;
+export const OFFLINE_GRANT_SCOPE = "party-check-in";
+export const OFFLINE_GRANT_MAX_LIFETIME_SECONDS = 12 * 60 * 60;

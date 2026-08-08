@@ -1,0 +1,17 @@
+{
+  "name": "@party-check-in/worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --config ../../wrangler.jsonc --outdir apps/worker/dist",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260804.1",
+    "@cloudflare/vitest-pool-workers": "0.20.3",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

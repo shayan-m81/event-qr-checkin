@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "party-check-in",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-08-07",
+  "secrets": {
+    "required": [
+      "ADMIN_ACCESS_CODE",
+      "PRIMARY_SCANNER_ACCESS_CODE",
+      "SECONDARY_SCANNER_ACCESS_CODE",
+      "SESSION_SECRET",
+      "OFFLINE_GRANT_PRIVATE_KEY"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "party-check-in",
+      // Replace this placeholder with the UUID returned by `wrangler d1 create party-check-in` before production deployment.
+      "database_id": "0b500459-a514-4306-af5c-8392245e806d",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
