@@ -9,3 +9,4 @@ apps/*/dist/
 backups/
 *.log
 .local-keys/
+*.tsbuildinfo
