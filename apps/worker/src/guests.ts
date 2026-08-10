@@ -6,11 +6,14 @@ import { AUTHENTICATED_STAFF } from "./permissions";
 
 const GUEST_RESULT_LIMIT = 200;
 const MAX_SEARCH_LENGTH = 120;
+const ticketTypes = ["General admission", "VIP"] as const;
 
 type GuestRow = {
   ticket_id: number;
   guest_name: string;
+  referee_name: string;
   ticket_type: string;
+  created_at: string;
   voided_at: string | null;
   checked_in_at: string | null;
   checkin_source: string | null;
@@ -26,7 +29,9 @@ function guestFromRow(row: GuestRow) {
   return {
     ticketId: row.ticket_id,
     guestName: row.guest_name,
+    refereeName: row.referee_name,
     ticketType: row.ticket_type,
+    createdAt: row.created_at,
     status: row.voided_at ? "CANCELLED" : row.checked_in_at ? "CHECKED_IN" : "NOT_ARRIVED",
     checkedInAt: row.checked_in_at,
     checkinSource: row.checkin_source,
@@ -38,42 +43,55 @@ function prefixUpperBound(query: string): string {
 }
 
 async function listGuests(request: Request, env: Env, session: Session): Promise<Response> {
-  const query = (new URL(request.url).searchParams.get("query") ?? "").trim().replace(/\s+/g, " ");
-  if (query.length > MAX_SEARCH_LENGTH) return json({ error: "invalid_search" }, 400);
+  const searchParams = new URL(request.url).searchParams;
+  const query = (searchParams.get("query") ?? "").trim().replace(/\s+/g, " ");
+  const referee = (searchParams.get("referee") ?? "").trim().replace(/\s+/g, " ");
+  const ticketType = (searchParams.get("ticketType") ?? "").trim();
+  if (query.length > MAX_SEARCH_LENGTH || referee.length > MAX_SEARCH_LENGTH) {
+    return json({ error: "invalid_search" }, 400);
+  }
+  if (ticketType && !ticketTypes.includes(ticketType as (typeof ticketTypes)[number])) {
+    return json({ error: "invalid_ticket_type" }, 400);
+  }
 
-  const statement = query
-    ? env.DB.prepare(`
-        SELECT
-          tickets.id AS ticket_id,
-          tickets.guest_name,
-          tickets.ticket_type,
-          tickets.voided_at,
-          checkins.checked_in_at,
-          checkins.source AS checkin_source
-        FROM tickets
-        LEFT JOIN checkins ON checkins.ticket_id = tickets.id
-        WHERE tickets.guest_name >= ? COLLATE NOCASE
-          AND tickets.guest_name < ? COLLATE NOCASE
-        ORDER BY tickets.guest_name COLLATE NOCASE, tickets.id
-        LIMIT ?
-      `).bind(query, prefixUpperBound(query), GUEST_RESULT_LIMIT)
-    : env.DB.prepare(`
-        SELECT
-          tickets.id AS ticket_id,
-          tickets.guest_name,
-          tickets.ticket_type,
-          tickets.voided_at,
-          checkins.checked_in_at,
-          checkins.source AS checkin_source
-        FROM tickets
-        LEFT JOIN checkins ON checkins.ticket_id = tickets.id
-        ORDER BY tickets.guest_name COLLATE NOCASE, tickets.id
-        LIMIT ?
-      `).bind(GUEST_RESULT_LIMIT);
+  const conditions: string[] = [];
+  const bindings: Array<string | number> = [];
+  if (query) {
+    conditions.push("tickets.guest_name >= ? COLLATE NOCASE", "tickets.guest_name < ? COLLATE NOCASE");
+    bindings.push(query, prefixUpperBound(query));
+  }
+  if (referee) {
+    conditions.push("tickets.referee_name >= ? COLLATE NOCASE", "tickets.referee_name < ? COLLATE NOCASE");
+    bindings.push(referee, prefixUpperBound(referee));
+  }
+  if (ticketType) {
+    conditions.push("tickets.ticket_type = ?");
+    bindings.push(ticketType);
+  }
+  bindings.push(GUEST_RESULT_LIMIT);
+
+  const statement = env.DB.prepare(`
+    SELECT
+      tickets.id AS ticket_id,
+      tickets.guest_name,
+      tickets.referee_name,
+      tickets.ticket_type,
+      tickets.created_at,
+      tickets.voided_at,
+      checkins.checked_in_at,
+      checkins.source AS checkin_source
+    FROM tickets
+    LEFT JOIN checkins ON checkins.ticket_id = tickets.id
+    ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
+    ORDER BY tickets.guest_name COLLATE NOCASE, tickets.id
+    LIMIT ?
+  `).bind(...bindings);
   const result = await statement.all<GuestRow>();
   return json({
     guests: result.results.map(guestFromRow),
     query,
+    referee,
+    ticketType,
     canManualCheckIn: session.role === "ADMIN",
     canManageTickets: session.role === "ADMIN",
   });

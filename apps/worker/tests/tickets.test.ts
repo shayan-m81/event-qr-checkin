@@ -8,6 +8,7 @@ type StoredTicket = {
   id: number;
   token: string;
   guest_name: string;
+  referee_name: string;
   ticket_type: string;
   created_at: string;
   voided_at: string | null;
@@ -27,12 +28,13 @@ class MemoryTicketDatabase {
       },
       async first<T>(): Promise<T | null> {
         if (normalized.startsWith("INSERT OR IGNORE INTO TICKETS")) {
-          const [token, guestName, ticketType] = values as [string, string, string];
+          const [token, guestName, refereeName, ticketType] = values as [string, string, string, string];
           if (database.tickets.some((ticket) => ticket.token === token)) return null;
           const ticket: StoredTicket = {
             id: database.tickets.length + 1,
             token,
             guest_name: guestName,
+            referee_name: refereeName,
             ticket_type: ticketType,
             created_at: `2026-08-07T20:00:0${database.tickets.length}.000Z`,
             voided_at: null,
@@ -54,6 +56,12 @@ class MemoryTicketDatabase {
       },
       async all<T>() {
         if (!normalized.includes("FROM TICKETS")) throw new Error(`Unsupported all query: ${normalized}`);
+        if (normalized.startsWith("SELECT DISTINCT REFEREE_NAME")) {
+          const refereeNames = [...new Set(database.tickets.map((ticket) => ticket.referee_name).filter(Boolean))]
+            .sort((left, right) => left.localeCompare(right))
+            .map((referee_name) => ({ referee_name }));
+          return { results: refereeNames as T[], success: true, meta: {} };
+        }
         return { results: [...database.tickets].reverse() as T[], success: true, meta: {} };
       },
     };
@@ -108,20 +116,23 @@ describe("ticket API", () => {
     const response = await apiRequest(testEnv(database), "/api/tickets", "ADMIN", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guestName: "  Maya   Chen ", ticketType: "VIP" }),
+      body: JSON.stringify({ guestName: "  Maya   Chen ", refereeName: "  Sam   Rivera ", ticketType: "VIP" }),
     });
     expect(response.status).toBe(201);
-    const body = await response.json() as { ticket: { guestName: string; token: string } };
+    const body = await response.json() as { ticket: { guestName: string; refereeName: string; token: string } };
     expect(body.ticket.guestName).toBe("Maya Chen");
+    expect(body.ticket.refereeName).toBe("Sam Rivera");
     expect(body.ticket.token).toMatch(/^pt_[A-Za-z0-9_-]{32}$/);
     expect(body.ticket.token).not.toContain("Maya");
     expect(database.tickets).toHaveLength(1);
   });
 
   it.each([
-    [{ guestName: "", ticketType: "VIP" }, "invalid_guest_name"],
-    [{ guestName: "x".repeat(121), ticketType: "VIP" }, "invalid_guest_name"],
-    [{ guestName: "Maya Chen", ticketType: "Backstage" }, "invalid_ticket_type"],
+    [{ guestName: "", refereeName: "Sam Rivera", ticketType: "VIP" }, "invalid_guest_name"],
+    [{ guestName: "x".repeat(121), refereeName: "Sam Rivera", ticketType: "VIP" }, "invalid_guest_name"],
+    [{ guestName: "Maya Chen", refereeName: "", ticketType: "VIP" }, "invalid_referee_name"],
+    [{ guestName: "Maya Chen", refereeName: "x".repeat(121), ticketType: "VIP" }, "invalid_referee_name"],
+    [{ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "Backstage" }, "invalid_ticket_type"],
   ])("validates creation input", async (input, error) => {
     const response = await apiRequest(testEnv(), "/api/tickets", "ADMIN", {
       method: "POST",
@@ -147,15 +158,20 @@ describe("ticket API", () => {
     const createdResponse = await apiRequest(env, "/api/tickets", "ADMIN", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guestName: "Maya Chen", ticketType: "General admission" }),
+      body: JSON.stringify({ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "General admission" }),
     });
     const created = await createdResponse.json() as { ticket: { id: number } };
 
     const listed = await apiRequest(env, "/api/tickets", "ADMIN");
-    await expect(listed.json()).resolves.toMatchObject({ tickets: [{ id: created.ticket.id }] });
+    await expect(listed.json()).resolves.toMatchObject({
+      tickets: [{ id: created.ticket.id, refereeName: "Sam Rivera" }],
+      refereeNames: ["Sam Rivera"],
+    });
 
     const retrieved = await apiRequest(env, `/api/tickets/${created.ticket.id}`, "ADMIN");
-    await expect(retrieved.json()).resolves.toMatchObject({ ticket: { guestName: "Maya Chen", voidedAt: null } });
+    await expect(retrieved.json()).resolves.toMatchObject({
+      ticket: { guestName: "Maya Chen", refereeName: "Sam Rivera", voidedAt: null },
+    });
 
     const firstCancel = await apiRequest(env, `/api/tickets/${created.ticket.id}/cancel`, "ADMIN", { method: "POST" });
     const firstBody = await firstCancel.json() as { ticket: { voidedAt: string } };

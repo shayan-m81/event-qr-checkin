@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/AppShell";
+import { formatJalaliDate, formatJalaliDateTime } from "../lib/jalaliDate";
 import { requestWithTimeout } from "../lib/request";
 
 type GuestStatus = "CHECKED_IN" | "NOT_ARRIVED" | "CANCELLED";
@@ -7,7 +8,9 @@ type GuestStatus = "CHECKED_IN" | "NOT_ARRIVED" | "CANCELLED";
 type Guest = {
   ticketId: number;
   guestName: string;
+  refereeName: string;
   ticketType: string;
+  createdAt: string;
   status: GuestStatus;
   checkedInAt: string | null;
   checkinSource: string | null;
@@ -23,6 +26,8 @@ type Feedback = {
   tone: "success" | "danger" | "warning";
   message: string;
 } | null;
+
+type TicketTypeFilter = "ALL" | "VIP" | "GENERAL";
 
 type OfflineConflict = {
   client_operation_id: string;
@@ -40,11 +45,8 @@ function initials(name: string): string {
   return name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
-function checkinTime(value: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+function checkinDateTime(value: string | null): string {
+  return value ? formatJalaliDateTime(value) : "";
 }
 
 function statusLabel(guest: Guest): string {
@@ -57,6 +59,8 @@ export function GuestsPage() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [totals, setTotals] = useState<Totals>(emptyTotals);
   const [query, setQuery] = useState("");
+  const [refereeFilter, setRefereeFilter] = useState("");
+  const [ticketTypeFilter, setTicketTypeFilter] = useState<TicketTypeFilter>("ALL");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [canManualCheckIn, setCanManualCheckIn] = useState(false);
   const [canManageTickets, setCanManageTickets] = useState(false);
@@ -76,7 +80,12 @@ export function GuestsPage() {
       setIsLoading(true);
       setLoadError("");
       try {
-        const response = await requestWithTimeout(`/api/guests?query=${encodeURIComponent(query.trim())}`, {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("query", query.trim());
+        if (refereeFilter.trim()) params.set("referee", refereeFilter.trim());
+        if (ticketTypeFilter === "VIP") params.set("ticketType", "VIP");
+        if (ticketTypeFilter === "GENERAL") params.set("ticketType", "General admission");
+        const response = await requestWithTimeout(`/api/guests?${params.toString()}`, {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Guest list request failed");
@@ -98,7 +107,7 @@ export function GuestsPage() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [query, refreshVersion]);
+  }, [query, refereeFilter, ticketTypeFilter, refreshVersion]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,7 +159,7 @@ export function GuestsPage() {
       } else if (result.state === "ALREADY_USED") {
         setFeedback({
           tone: "danger",
-          message: `${guest.guestName} was already checked in${result.checkedInAt ? ` at ${checkinTime(result.checkedInAt)}` : ""}.`,
+          message: `${guest.guestName} was already checked in${result.checkedInAt ? ` at ${checkinDateTime(result.checkedInAt)}` : ""}.`,
         });
       } else if (result.state === "VOIDED") {
         setFeedback({ tone: "danger", message: `TICKET CANCELLED — DO NOT ADMIT. ${guest.guestName} was not checked in.` });
@@ -211,7 +220,7 @@ export function GuestsPage() {
           {offlineConflicts.map((conflict) => (
             <div key={conflict.client_operation_id}>
               <strong>{conflict.guest_name}</strong>
-              <span>Offline at {checkinTime(conflict.local_checked_in_at)} · server check-in at {checkinTime(conflict.existing_checked_in_at)}</span>
+              <span>Offline at {checkinDateTime(conflict.local_checked_in_at)} · server check-in at {checkinDateTime(conflict.existing_checked_in_at)}</span>
             </div>
           ))}
         </section>
@@ -232,6 +241,45 @@ export function GuestsPage() {
         />
       </label>
 
+      <section className="guest-filters" aria-labelledby="guest-filters-title">
+        <p id="guest-filters-title" className="eyebrow">Filter guests</p>
+        <label className="search-field" htmlFor="guest-referee-filter">
+          <span className="sr-only">Filter by referee name</span>
+          <i aria-hidden="true">⌕</i>
+          <input
+            id="guest-referee-filter"
+            aria-label="Filter by referee name"
+            placeholder="Referee name"
+            value={refereeFilter}
+            maxLength={120}
+            onChange={(event) => {
+              setRefereeFilter(event.target.value);
+              setFeedback(null);
+            }}
+          />
+        </label>
+        <div className="guest-type-filters" aria-label="Filter by ticket type">
+          {([
+            ["ALL", "All"],
+            ["VIP", "VIP"],
+            ["GENERAL", "General"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={ticketTypeFilter === value ? "active" : ""}
+              aria-pressed={ticketTypeFilter === value}
+              onClick={() => {
+                setTicketTypeFilter(value);
+                setFeedback(null);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       {feedback && <div className={`guest-feedback ${feedback.tone}`} role="status">{feedback.message}</div>}
       {loadError && <div className="guest-feedback danger" role="alert">{loadError}</div>}
 
@@ -251,10 +299,10 @@ export function GuestsPage() {
             >
               <span className="guest-initials" aria-hidden="true">{initials(guest.guestName)}</span>
               <span className="guest-summary">
-                <strong>{guest.guestName}</strong><small>{guest.ticketType} · Ticket #{guest.ticketId}</small>
+                <strong>{guest.guestName}</strong><small>{guest.refereeName || "No referee"} · {guest.ticketType} · Ticket #{guest.ticketId}</small>
               </span>
               <span className={`arrival-state ${guest.status === "CHECKED_IN" ? "arrived" : guest.status === "CANCELLED" ? "voided" : "waiting"}`}>
-                <i />{statusLabel(guest)}{guest.status === "CHECKED_IN" && guest.checkedInAt ? ` · ${checkinTime(guest.checkedInAt)}` : ""}
+                <i />{statusLabel(guest)}{guest.status === "CHECKED_IN" && guest.checkedInAt ? ` · ${checkinDateTime(guest.checkedInAt)}` : ""}
               </span>
             </button>
           ))}
@@ -272,11 +320,13 @@ export function GuestsPage() {
           </div>
           <dl>
             <div><dt>Ticket</dt><dd>#{selectedGuest.ticketId}</dd></div>
+            <div><dt>Referee</dt><dd>{selectedGuest.refereeName || "Not specified"}</dd></div>
             <div><dt>Type</dt><dd>{selectedGuest.ticketType}</dd></div>
+            <div><dt>Purchase date</dt><dd>{formatJalaliDate(selectedGuest.createdAt)}</dd></div>
             <div>
               <dt>Status</dt>
               <dd className={selectedGuest.status === "CHECKED_IN" ? "green-text" : selectedGuest.status === "CANCELLED" ? "orange-text" : ""}>
-                {statusLabel(selectedGuest)}{selectedGuest.status === "CHECKED_IN" && selectedGuest.checkedInAt ? ` · ${checkinTime(selectedGuest.checkedInAt)}` : ""}
+                {statusLabel(selectedGuest)}{selectedGuest.status === "CHECKED_IN" && selectedGuest.checkedInAt ? ` · ${checkinDateTime(selectedGuest.checkedInAt)}` : ""}
               </dd>
             </div>
           </dl>

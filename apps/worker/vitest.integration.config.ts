@@ -7,6 +7,7 @@ export default defineConfig({
     cloudflareTest(async () => ({
       main: "./src/index.ts",
       miniflare: {
+        compatibilityDate: "2026-08-08",
         d1Databases: ["DB"],
         bindings: {
           ADMIN_ACCESS_CODE: "admin-integration-access-code",

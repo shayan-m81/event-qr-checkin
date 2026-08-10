@@ -6,12 +6,12 @@ Mobile-first party ticketing and QR check-in for event teams. The app combines t
 
 ## Highlights
 
-- Admin ticket creation with cryptographically random `pt_...` QR tokens.
-- Browser-side ticket artwork and PNG download using a fixed template.
+- Admin ticket creation with reusable referee names and cryptographically random `pt_...` QR tokens.
+- Browser-side General and VIP/Special Guest artwork with guest, referee, Jalali purchase date, QR code, and PNG download.
 - Mobile QR scanning with the rear-facing camera via `@zxing/browser`.
 - Database-enforced duplicate check-in protection with Cloudflare D1.
 - Online check-in for Admin, Primary Scanner, and Secondary Scanner roles.
-- Guest search, authoritative check-in status, totals, and Admin manual check-in.
+- Guest search, referee/type filters, authoritative check-in status, totals, and Admin manual check-in.
 - Admin ticket cancellation and restoration without changing the original QR token.
 - Primary-only emergency offline scanning backed by IndexedDB and a Service Worker shell.
 - Short-lived, asymmetric-signed offline scanner grants; normal authentication remains server-authoritative.

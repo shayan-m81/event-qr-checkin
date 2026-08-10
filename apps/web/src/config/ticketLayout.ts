@@ -1,27 +1,56 @@
 export const ticketLayout = {
   canvas: {
-    width: 1122,
-    height: 1402,
+    width: 1080,
+    height: 1080,
   },
   name: {
-    x: 66,
-    y: 500,
-    maxWidth: 610,
-    maxLines: 2,
+    x: 188,
+    y: 349,
+    maxWidth: 455,
+    maxLines: 1,
     fontFamily: "Inter, Arial, sans-serif",
-    fontWeight: 800,
-    fontSize: 88,
-    minFontSize: 50,
-    lineHeight: 1.04,
-    color: "#f5f6f7",
+    fontWeight: 500,
+    fontSize: 29,
+    minFontSize: 18,
+    lineHeight: 1,
+    color: "#d6d6d6",
+  },
+  referee: {
+    x: 255,
+    y: 405,
+    maxWidth: 388,
+    maxLines: 1,
+    fontFamily: "Inter, Arial, sans-serif",
+    fontWeight: 500,
+    fontSize: 29,
+    minFontSize: 18,
+    lineHeight: 1,
+    color: "#d6d6d6",
+  },
+  purchaseDate: {
+    x: 332,
+    y: 460,
+    maxWidth: 317,
+    maxLines: 1,
+    fontFamily: "Inter, Arial, sans-serif",
+    fontWeight: 500,
+    fontSize: 29,
+    minFontSize: 22,
+    lineHeight: 1,
+    color: "#d6d6d6",
   },
   qr: {
-    x: 89,
-    y: 1059,
-    size: 250,
-    darkColor: "#101411",
-    lightColor: "#d8ff52",
+    x: 705,
+    y: 309,
+    size: 270,
+    darkColor: "#000000",
+    lightColor: "#ffffff",
   },
 } as const;
 
 export const ticketTemplatePath = "/ticket-template.png";
+export const vipTicketTemplatePath = "/ticket-template-vip.png";
+
+export function ticketTemplatePathForType(ticketType: string): string {
+  return ticketType === "VIP" ? vipTicketTemplatePath : ticketTemplatePath;
+}

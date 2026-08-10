@@ -46,6 +46,7 @@ function authenticatedFetch(role: Role) {
     const path = new URL(String(input), "https://party.test").pathname;
     if (path === "/api/auth/session") return json({ authenticated: true, role });
     if (path === "/api/auth/logout") return new Response(null, { status: 204 });
+    if (path === "/api/tickets") return json({ tickets: [], refereeNames: [] });
     if (path === "/api/offline/snapshot") return json({ generatedAt: new Date().toISOString(), tickets: [] });
     if (path === "/api/readiness/status") return json({ ticketCount: 0, checkedAt: new Date().toISOString() });
     if (path === "/api/guests/totals") return json({ totalTickets: 0, checkedInCount: 0, remainingCount: 0 });
@@ -215,6 +216,124 @@ describe("logout", () => {
     await user.click(screen.getByRole("button", { name: "Test navigate to scan" }));
     await waitFor(() => expect(screen.getByLabelText("current path")).toHaveTextContent("/login"));
     expect(screen.queryByText("Ready to Scan")).not.toBeInTheDocument();
+  });
+});
+
+describe("Admin ticket referee workflow", () => {
+  const existingTickets = [
+    {
+      id: 1,
+      token: "pt_maya0000000000000000000000000000",
+      guestName: "Maya Chen",
+      refereeName: "Sam Rivera",
+      ticketType: "VIP",
+      createdAt: "2026-08-10T10:00:00.000Z",
+      voidedAt: null,
+    },
+    {
+      id: 2,
+      token: "pt_noah000000000000000000000000000",
+      guestName: "Noah Williams",
+      refereeName: "Alex Morgan",
+      ticketType: "General admission",
+      createdAt: "2026-08-10T09:00:00.000Z",
+      voidedAt: null,
+    },
+  ];
+
+  it("suggests previous referees while preserving free-text ticket creation", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input), "https://party.test").pathname;
+      if (path === "/api/auth/session") return json({ authenticated: true, role: "ADMIN" });
+      if (path === "/api/tickets" && init?.method === "POST") {
+        return json({
+          ticket: {
+            ...existingTickets[0],
+            id: 3,
+            guestName: "Taylor Reed",
+            refereeName: "New Referee",
+          },
+        }, 201);
+      }
+      if (path === "/api/tickets") return json({
+        tickets: existingTickets,
+        refereeNames: ["Alex Morgan", "Sam Rivera"],
+      });
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/admin");
+
+    const refereeInput = await screen.findByLabelText("Referee name");
+    await user.click(refereeInput);
+    expect(screen.getByRole("option", { name: "Alex Morgan" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Sam Rivera" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Guest name"), "Taylor Reed");
+    await user.type(refereeInput, "New Referee");
+    await user.click(screen.getByRole("button", { name: /generate ticket/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tickets",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          guestName: "Taylor Reed",
+          refereeName: "New Referee",
+          ticketType: "General admission",
+        }),
+      }),
+    ));
+    expect(await screen.findByText(/created for Taylor Reed/i)).toBeInTheDocument();
+  });
+
+  it("shows ticket details and filters the guest list by referee and type", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input), "https://party.test");
+      const path = url.pathname;
+      if (path === "/api/auth/session") return json({ authenticated: true, role: "ADMIN" });
+      if (path === "/api/guests/totals") return json({ totalTickets: 2, checkedInCount: 0, remainingCount: 2 });
+      if (path === "/api/offline/conflicts") return json({ conflicts: [] });
+      if (path === "/api/guests") {
+        const referee = url.searchParams.get("referee")?.toLocaleLowerCase() ?? "";
+        const type = url.searchParams.get("ticketType") ?? "";
+        return json({
+          guests: existingTickets
+            .filter((ticket) => ticket.refereeName.toLocaleLowerCase().startsWith(referee))
+            .filter((ticket) => !type || ticket.ticketType === type)
+            .map((ticket) => ({
+              ticketId: ticket.id,
+              guestName: ticket.guestName,
+              refereeName: ticket.refereeName,
+              ticketType: ticket.ticketType,
+              createdAt: ticket.createdAt,
+              status: "NOT_ARRIVED",
+              checkedInAt: null,
+              checkinSource: null,
+            })),
+          canManualCheckIn: true,
+          canManageTickets: true,
+        });
+      }
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/guests");
+
+    expect((await screen.findAllByText(/Sam Rivera/)).length).toBeGreaterThan(0);
+    expect(await screen.findByText("1405/05/19")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Filter by referee name"), "Alex");
+    await waitFor(() => expect(screen.queryByText("Maya Chen")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Noah Williams").length).toBeGreaterThan(0);
+
+    await user.clear(screen.getByLabelText("Filter by referee name"));
+    await user.click(screen.getByRole("button", { name: "VIP" }));
+    await waitFor(() => expect(screen.queryByText("Noah Williams")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Maya Chen").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "General" }));
+    await waitFor(() => expect(screen.queryByText("Maya Chen")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Noah Williams").length).toBeGreaterThan(0);
   });
 });
 
