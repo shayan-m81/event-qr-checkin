@@ -56,6 +56,7 @@ export function evaluateReadiness(input: {
   const cacheFresh = hasSnapshot && cacheAge <= OFFLINE_CACHE_FRESHNESS_MS;
   const countsMatch = input.server.ticketCount !== null
     && input.offline.cachedTicketCount === input.server.ticketCount;
+  const primaryGrantRequired = input.role === "PRIMARY_SCANNER";
 
   const grant = input.offlineAuthorization;
   const grantItem: ReadinessItem = grant.valid ? {
@@ -67,9 +68,11 @@ export function evaluateReadiness(input: {
   } : {
     id: "offline-authorization",
     label: "Offline Authorization",
-    status: "FAIL",
-    value: grant.reason.replaceAll("_", " "),
-    detail: grant.detail,
+    status: primaryGrantRequired ? "FAIL" : "WARNING",
+    value: primaryGrantRequired ? grant.reason.replaceAll("_", " ") : "PRIMARY LOGIN REQUIRED",
+    detail: primaryGrantRequired
+      ? grant.detail
+      : "Device-specific offline authorization can only be prepared while signed in as Primary Scanner",
   };
 
   const items: ReadinessItem[] = [
@@ -127,12 +130,13 @@ export function evaluateReadiness(input: {
   if (!input.server.reachable || input.server.ticketCount === null) actions.push("Restore server connectivity and run the check again");
   if (!hasSnapshot || !countsMatch || !cacheFresh) actions.push("Refresh offline cache");
   if (input.offline.pendingCount > 0) actions.push(`Synchronize ${input.offline.pendingCount} pending check-in${input.offline.pendingCount === 1 ? "" : "s"}`);
-  if (!grant.valid) actions.push(input.role === "PRIMARY_SCANNER"
-    ? "Prepare this device for offline use"
-    : "Sign in as Primary Scanner on this device and prepare offline authorization");
+  if (!grant.valid && primaryGrantRequired) actions.push("Prepare this device for offline use");
   if (!input.serviceWorker.registered || !input.serviceWorker.controlled) actions.push("Reload this page online so the Service Worker controls it");
   else if (!input.serviceWorker.shellCached) actions.push("Reload online to cache the application shell");
   if (input.camera !== "READY") actions.push("Check camera permission and availability");
 
-  return { ready: items.every((item) => item.status === "PASS"), items, actions: [...new Set(actions)] };
+  const requiredItems = primaryGrantRequired
+    ? items
+    : items.filter((item) => item.id !== "offline-authorization");
+  return { ready: requiredItems.every((item) => item.status === "PASS"), items, actions: [...new Set(actions)] };
 }

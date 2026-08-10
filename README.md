@@ -6,13 +6,15 @@ Mobile-first party ticketing and QR check-in for event teams. The app combines t
 
 ## Highlights
 
-- Admin ticket creation with cryptographically random `pt_...` QR tokens.
-- Browser-side ticket artwork and PNG download using a fixed template.
+- Admin ticket creation with reusable referee names and cryptographically random `pt_...` QR tokens.
+- Browser-side General and VIP/Special Guest artwork with guest, referee, Jalali purchase date, QR code, and PNG download.
 - Mobile QR scanning with the rear-facing camera via `@zxing/browser`.
 - Database-enforced duplicate check-in protection with Cloudflare D1.
 - Online check-in for Admin, Primary Scanner, and Secondary Scanner roles.
-- Guest search, authoritative check-in status, totals, and Admin manual check-in.
+- Guest search, referee/type/status filters, authoritative check-in state, totals, and Admin manual check-in.
 - Admin ticket cancellation and restoration without changing the original QR token.
+- Safe Admin corrections for guest/referee details and pre-check-in ticket type, with no hard deletion or QR replacement.
+- Persistent Admin regeneration and download of current ticket artwork without server-side PNG storage.
 - Primary-only emergency offline scanning backed by IndexedDB and a Service Worker shell.
 - Short-lived, asymmetric-signed offline scanner grants; normal authentication remains server-authoritative.
 - Event Readiness screen for cache, camera, Service Worker, synchronization, and offline authorization checks.
@@ -118,7 +120,7 @@ Create local-only secrets:
 cp .dev.vars.example .dev.vars
 ```
 
-Replace every example value in `.dev.vars`. Do not commit that file. For local offline-grant verification, configure the matching public key as `OFFLINE_GRANT_PUBLIC_KEY_SPKI` in the frontend build environment; the private key belongs only in Worker secrets.
+Replace every example value in `.dev.vars`. Do not commit that file. The offline-grant public verification key is committed at `apps/web/offline-grant-public.spki.b64`; the matching private key belongs only in Worker secrets.
 
 Apply the local D1 migrations and start the Worker with its static frontend:
 
@@ -153,7 +155,7 @@ Worker secrets are configured through Wrangler and must never be committed:
 - `SESSION_SECRET`
 - `OFFLINE_GRANT_PRIVATE_KEY`
 
-The public P-256 verification key may be embedded into the frontend build as `OFFLINE_GRANT_PUBLIC_KEY_SPKI`. It is not secret, but it must match the Worker private key. See [DEPLOYMENT.md](DEPLOYMENT.md) for key generation, D1 production migration, deployment, logs, rollback, and smoke-test procedures.
+The public P-256 verification key is embedded into the frontend build from `apps/web/offline-grant-public.spki.b64`. It is intentionally public and must match the Worker private key. The build fails if the committed key is missing or malformed. See [DEPLOYMENT.md](DEPLOYMENT.md) for key generation, rotation, D1 production migration, deployment, logs, rollback, and smoke-test procedures.
 
 ## Security model
 

@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/AppShell";
+import { formatJalaliDate, formatJalaliDateTime } from "../lib/jalaliDate";
 import { requestWithTimeout } from "../lib/request";
+import { renderTicketImage, ticketDownloadName } from "../lib/ticketImage";
 
 type GuestStatus = "CHECKED_IN" | "NOT_ARRIVED" | "CANCELLED";
 
 type Guest = {
   ticketId: number;
   guestName: string;
+  refereeName: string;
   ticketType: string;
+  createdAt: string;
   status: GuestStatus;
   checkedInAt: string | null;
   checkinSource: string | null;
@@ -23,6 +27,29 @@ type Feedback = {
   tone: "success" | "danger" | "warning";
   message: string;
 } | null;
+
+type TicketTypeFilter = "ALL" | "VIP" | "GENERAL";
+type GuestStatusFilter = "ALL" | GuestStatus;
+
+type EditableTicket = {
+  id: number;
+  token: string;
+  guestName: string;
+  refereeName: string;
+  ticketType: string;
+  createdAt: string;
+  voidedAt: string | null;
+};
+
+type EditDraft = {
+  ticketId: number;
+  originalName: string;
+  guestName: string;
+  refereeName: string;
+  ticketType: string;
+  status: GuestStatus;
+  typeLocked: boolean;
+};
 
 type OfflineConflict = {
   client_operation_id: string;
@@ -40,11 +67,8 @@ function initials(name: string): string {
   return name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
-function checkinTime(value: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+function checkinDateTime(value: string | null): string {
+  return value ? formatJalaliDateTime(value) : "";
 }
 
 function statusLabel(guest: Guest): string {
@@ -57,6 +81,10 @@ export function GuestsPage() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [totals, setTotals] = useState<Totals>(emptyTotals);
   const [query, setQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [refereeFilter, setRefereeFilter] = useState("");
+  const [ticketTypeFilter, setTicketTypeFilter] = useState<TicketTypeFilter>("ALL");
+  const [statusFilter, setStatusFilter] = useState<GuestStatusFilter>("ALL");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [canManualCheckIn, setCanManualCheckIn] = useState(false);
   const [canManageTickets, setCanManageTickets] = useState(false);
@@ -64,11 +92,19 @@ export function GuestsPage() {
   const [manualTicketId, setManualTicketId] = useState<number | null>(null);
   const [managingTicketId, setManagingTicketId] = useState<number | null>(null);
   const [cancelCandidate, setCancelCandidate] = useState<Guest | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [updatedTicket, setUpdatedTicket] = useState<EditableTicket | null>(null);
+  const [isUpdatedImageReady, setIsUpdatedImageReady] = useState(false);
+  const [regeneratingTicketId, setRegeneratingTicketId] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [loadError, setLoadError] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [offlineConflicts, setOfflineConflicts] = useState<OfflineConflict[]>([]);
   const manualCheckinLock = useRef(false);
+  const editLock = useRef(false);
+  const updatedCanvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,7 +112,13 @@ export function GuestsPage() {
       setIsLoading(true);
       setLoadError("");
       try {
-        const response = await requestWithTimeout(`/api/guests?query=${encodeURIComponent(query.trim())}`, {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("query", query.trim());
+        if (refereeFilter.trim()) params.set("referee", refereeFilter.trim());
+        if (ticketTypeFilter === "VIP") params.set("ticketType", "VIP");
+        if (ticketTypeFilter === "GENERAL") params.set("ticketType", "General admission");
+        if (statusFilter !== "ALL") params.set("status", statusFilter);
+        const response = await requestWithTimeout(`/api/guests?${params.toString()}`, {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Guest list request failed");
@@ -98,7 +140,7 @@ export function GuestsPage() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [query, refreshVersion]);
+  }, [query, refereeFilter, ticketTypeFilter, statusFilter, refreshVersion]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -128,10 +170,27 @@ export function GuestsPage() {
     }
   }, [guests, selectedId]);
 
+  useEffect(() => {
+    if (!updatedTicket || !updatedCanvasRef.current) return;
+    let cancelled = false;
+    setIsUpdatedImageReady(false);
+    void renderTicketImage(updatedCanvasRef.current, updatedTicket)
+      .then(() => {
+        if (!cancelled) setIsUpdatedImageReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setFeedback({ tone: "danger", message: "The correction was saved, but the updated PNG could not be rendered." });
+      });
+    return () => { cancelled = true; };
+  }, [updatedTicket]);
+
   const selectedGuest = useMemo(
     () => guests.find((guest) => guest.ticketId === selectedId) ?? null,
     [guests, selectedId],
   );
+  const activeFilterCount = Number(Boolean(refereeFilter.trim()))
+    + Number(ticketTypeFilter !== "ALL")
+    + Number(statusFilter !== "ALL");
 
   async function manualCheckIn(guest: Guest) {
     if (!canManualCheckIn || manualCheckinLock.current) return;
@@ -150,7 +209,7 @@ export function GuestsPage() {
       } else if (result.state === "ALREADY_USED") {
         setFeedback({
           tone: "danger",
-          message: `${guest.guestName} was already checked in${result.checkedInAt ? ` at ${checkinTime(result.checkedInAt)}` : ""}.`,
+          message: `${guest.guestName} was already checked in${result.checkedInAt ? ` at ${checkinDateTime(result.checkedInAt)}` : ""}.`,
         });
       } else if (result.state === "VOIDED") {
         setFeedback({ tone: "danger", message: `TICKET CANCELLED — DO NOT ADMIT. ${guest.guestName} was not checked in.` });
@@ -196,6 +255,118 @@ export function GuestsPage() {
     }
   }
 
+  function beginEdit(guest: Guest) {
+    setUpdatedTicket(null);
+    setEditError("");
+    setFeedback(null);
+    setEditDraft({
+      ticketId: guest.ticketId,
+      originalName: guest.guestName,
+      guestName: guest.guestName,
+      refereeName: guest.refereeName,
+      ticketType: guest.ticketType,
+      status: guest.status,
+      typeLocked: guest.checkedInAt !== null,
+    });
+  }
+
+  async function saveTicketEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManageTickets || !editDraft || editLock.current) return;
+    const guestName = editDraft.guestName.trim();
+    const refereeName = editDraft.refereeName.trim();
+    if (!guestName || !refereeName) {
+      setEditError("Guest name and referee name are required.");
+      return;
+    }
+    editLock.current = true;
+    setIsSavingEdit(true);
+    setEditError("");
+    try {
+      const response = await requestWithTimeout(`/api/tickets/${editDraft.ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestName, refereeName, ticketType: editDraft.ticketType }),
+      });
+      const body = await response.json().catch(() => ({})) as { ticket?: EditableTicket; error?: string };
+      if (response.status === 409 && body.error === "ticket_type_locked") {
+        setEditError("Ticket type cannot be changed after check-in. Keep the original type to save name corrections.");
+        return;
+      }
+      if (!response.ok || !body.ticket) {
+        if (response.status === 401 || response.status === 403) {
+          setEditError("Your admin session has expired. Sign in again.");
+        } else if (body.error === "invalid_guest_name") {
+          setEditError("Enter a guest name between 1 and 120 characters.");
+        } else if (body.error === "invalid_referee_name") {
+          setEditError("Enter a referee name between 1 and 120 characters.");
+        } else {
+          setEditError("The ticket could not be updated. No changes were made.");
+        }
+        return;
+      }
+      const ticket = body.ticket;
+      setGuests((current) => current.map((guest) => guest.ticketId === ticket.id
+        ? { ...guest, guestName: ticket.guestName, refereeName: ticket.refereeName, ticketType: ticket.ticketType }
+        : guest));
+      setUpdatedTicket(ticket);
+      setEditDraft(null);
+      setFeedback({
+        tone: "success",
+        message: `${ticket.guestName}’s ticket was corrected. The QR code is unchanged. Refresh the Primary Scanner offline cache before offline use.`,
+      });
+      setRefreshVersion((version) => version + 1);
+    } catch {
+      setEditError("Couldn’t connect. No ticket details were changed.");
+    } finally {
+      editLock.current = false;
+      setIsSavingEdit(false);
+    }
+  }
+
+  async function regenerateTicket(guest: Guest) {
+    if (!canManageTickets || regeneratingTicketId !== null) return;
+    setRegeneratingTicketId(guest.ticketId);
+    setFeedback(null);
+    try {
+      const response = await requestWithTimeout(`/api/tickets/${guest.ticketId}`);
+      const body = await response.json().catch(() => ({})) as { ticket?: EditableTicket };
+      if (!response.ok || !body.ticket) {
+        if (response.status === 401 || response.status === 403) {
+          setFeedback({ tone: "danger", message: "Your admin session has expired. Sign in again." });
+        } else {
+          setFeedback({ tone: "danger", message: "The latest ticket details could not be loaded." });
+        }
+        return;
+      }
+      setUpdatedTicket(body.ticket);
+      setFeedback({
+        tone: "success",
+        message: `${body.ticket.guestName}’s ticket artwork was regenerated from the latest saved details.`,
+      });
+    } catch {
+      setFeedback({ tone: "danger", message: "Couldn’t connect. The ticket artwork was not regenerated." });
+    } finally {
+      setRegeneratingTicketId(null);
+    }
+  }
+
+  function downloadUpdatedTicket() {
+    if (!updatedTicket || !updatedCanvasRef.current || !isUpdatedImageReady) return;
+    updatedCanvasRef.current.toBlob((blob) => {
+      if (!blob) {
+        setFeedback({ tone: "danger", message: "This browser could not create the updated PNG." });
+        return;
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = ticketDownloadName(updatedTicket.guestName);
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+    }, "image/png");
+  }
+
   return (
     <AppShell eyebrow="Tonight’s party" title="Guest list" action={<span className="count-badge">{totals.totalTickets}</span>}>
       <div className="guest-totals" aria-label="Guest totals">
@@ -211,7 +382,7 @@ export function GuestsPage() {
           {offlineConflicts.map((conflict) => (
             <div key={conflict.client_operation_id}>
               <strong>{conflict.guest_name}</strong>
-              <span>Offline at {checkinTime(conflict.local_checked_in_at)} · server check-in at {checkinTime(conflict.existing_checked_in_at)}</span>
+              <span>Offline at {checkinDateTime(conflict.local_checked_in_at)} · server check-in at {checkinDateTime(conflict.existing_checked_in_at)}</span>
             </div>
           ))}
         </section>
@@ -232,6 +403,75 @@ export function GuestsPage() {
         />
       </label>
 
+      <section className={`guest-filters ${filtersOpen ? "open" : ""}`} aria-label="Guest filters">
+        <button
+          className="guest-filter-toggle"
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls="guest-filter-controls"
+          aria-label={`Filters, ${activeFilterCount > 0 ? `${activeFilterCount} active` : "All guests"}`}
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <span><strong>Filters</strong><small>{activeFilterCount > 0 ? `${activeFilterCount} active` : "All guests"}</small></span>
+          <i aria-hidden="true">⌄</i>
+        </button>
+        {filtersOpen && (
+          <div id="guest-filter-controls" className="guest-filter-controls">
+            <label htmlFor="guest-referee-filter">
+              <span>Referee name</span>
+              <input
+                id="guest-referee-filter"
+                placeholder="Any referee"
+                value={refereeFilter}
+                maxLength={120}
+                onChange={(event) => {
+                  setRefereeFilter(event.target.value);
+                  setFeedback(null);
+                }}
+              />
+            </label>
+            <div className="guest-filter-selects">
+              <label htmlFor="guest-ticket-type-filter">
+                <span>Ticket type</span>
+                <select id="guest-ticket-type-filter" value={ticketTypeFilter} onChange={(event) => {
+                  setTicketTypeFilter(event.target.value as TicketTypeFilter);
+                  setFeedback(null);
+                }}>
+                  <option value="ALL">All ticket types</option>
+                  <option value="VIP">VIP</option>
+                  <option value="GENERAL">General</option>
+                </select>
+              </label>
+              <label htmlFor="guest-status-filter">
+                <span>Guest status</span>
+                <select id="guest-status-filter" value={statusFilter} onChange={(event) => {
+                  setStatusFilter(event.target.value as GuestStatusFilter);
+                  setFeedback(null);
+                }}>
+                  <option value="ALL">All statuses</option>
+                  <option value="CHECKED_IN">Checked in</option>
+                  <option value="NOT_ARRIVED">Not arrived</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </label>
+            </div>
+            <button
+              className="guest-filter-clear"
+              type="button"
+              disabled={activeFilterCount === 0}
+              onClick={() => {
+                setRefereeFilter("");
+                setTicketTypeFilter("ALL");
+                setStatusFilter("ALL");
+                setFeedback(null);
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
+      </section>
+
       {feedback && <div className={`guest-feedback ${feedback.tone}`} role="status">{feedback.message}</div>}
       {loadError && <div className="guest-feedback danger" role="alert">{loadError}</div>}
 
@@ -246,15 +486,16 @@ export function GuestsPage() {
               className={`guest-row ${selectedId === guest.ticketId ? "selected" : ""}`}
               onClick={() => {
                 setSelectedId(guest.ticketId);
+                setUpdatedTicket(null);
                 setFeedback(null);
               }}
             >
               <span className="guest-initials" aria-hidden="true">{initials(guest.guestName)}</span>
               <span className="guest-summary">
-                <strong>{guest.guestName}</strong><small>{guest.ticketType} · Ticket #{guest.ticketId}</small>
+                <strong>{guest.guestName}</strong><small>{guest.refereeName || "No referee"} · {guest.ticketType} · Ticket #{guest.ticketId}</small>
               </span>
               <span className={`arrival-state ${guest.status === "CHECKED_IN" ? "arrived" : guest.status === "CANCELLED" ? "voided" : "waiting"}`}>
-                <i />{statusLabel(guest)}{guest.status === "CHECKED_IN" && guest.checkedInAt ? ` · ${checkinTime(guest.checkedInAt)}` : ""}
+                <i />{statusLabel(guest)}{guest.status === "CHECKED_IN" && guest.checkedInAt ? ` · ${checkinDateTime(guest.checkedInAt)}` : ""}
               </span>
             </button>
           ))}
@@ -272,11 +513,13 @@ export function GuestsPage() {
           </div>
           <dl>
             <div><dt>Ticket</dt><dd>#{selectedGuest.ticketId}</dd></div>
+            <div><dt>Referee</dt><dd>{selectedGuest.refereeName || "Not specified"}</dd></div>
             <div><dt>Type</dt><dd>{selectedGuest.ticketType}</dd></div>
+            <div><dt>Purchase date</dt><dd>{formatJalaliDate(selectedGuest.createdAt)}</dd></div>
             <div>
               <dt>Status</dt>
               <dd className={selectedGuest.status === "CHECKED_IN" ? "green-text" : selectedGuest.status === "CANCELLED" ? "orange-text" : ""}>
-                {statusLabel(selectedGuest)}{selectedGuest.status === "CHECKED_IN" && selectedGuest.checkedInAt ? ` · ${checkinTime(selectedGuest.checkedInAt)}` : ""}
+                {statusLabel(selectedGuest)}{selectedGuest.status === "CHECKED_IN" && selectedGuest.checkedInAt ? ` · ${checkinDateTime(selectedGuest.checkedInAt)}` : ""}
               </dd>
             </div>
           </dl>
@@ -299,22 +542,93 @@ export function GuestsPage() {
             <p className="permission-note">Scanner accounts can search guests. Manual check-in requires an admin.</p>
           )}
           {canManageTickets && (
-            <button
-              className={selectedGuest.status === "CANCELLED" ? "button button-secondary" : "button button-danger"}
-              type="button"
-              disabled={managingTicketId !== null || manualTicketId !== null}
-              onClick={() => selectedGuest.status === "CANCELLED"
-                ? void manageTicket(selectedGuest, "restore")
-                : setCancelCandidate(selectedGuest)}
-            >
-              {managingTicketId === selectedGuest.ticketId
-                ? "Updating ticket…"
-                : selectedGuest.status === "CANCELLED"
-                  ? "Restore Ticket"
-                  : "Cancel Ticket"}
-            </button>
+            <div className="ticket-management-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit || regeneratingTicketId !== null}
+                onClick={() => beginEdit(selectedGuest)}
+              >
+                Edit Ticket
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit || regeneratingTicketId !== null}
+                onClick={() => void regenerateTicket(selectedGuest)}
+              >
+                {regeneratingTicketId === selectedGuest.ticketId ? "Regenerating…" : "Regenerate Ticket"}
+              </button>
+              <button
+                className={selectedGuest.status === "CANCELLED" ? "button button-secondary" : "button button-danger"}
+                type="button"
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit || regeneratingTicketId !== null}
+                onClick={() => selectedGuest.status === "CANCELLED"
+                  ? void manageTicket(selectedGuest, "restore")
+                  : setCancelCandidate(selectedGuest)}
+              >
+                {managingTicketId === selectedGuest.ticketId
+                  ? "Updating ticket…"
+                  : selectedGuest.status === "CANCELLED"
+                    ? "Restore Ticket"
+                    : "Cancel Ticket"}
+              </button>
+            </div>
           )}
         </section>
+      )}
+
+      {updatedTicket && (
+        <section className="updated-ticket" aria-labelledby="updated-ticket-title">
+          <div>
+            <p className="eyebrow">Ticket artwork</p>
+            <h2 id="updated-ticket-title">Download current ticket</h2>
+            <p>Generated from the latest saved details. The ticket ID, QR code, purchase date, and check-in state are unchanged.</p>
+            {updatedTicket.voidedAt && <p className="orange-text">This ticket is still cancelled until you restore it.</p>}
+          </div>
+          <canvas ref={updatedCanvasRef} className="ticket-canvas" aria-label={`Updated ticket preview for ${updatedTicket.guestName}`} />
+          <button className="button button-secondary" type="button" disabled={!isUpdatedImageReady} onClick={downloadUpdatedTicket}>
+            Download Ticket PNG <span aria-hidden="true">↓</span>
+          </button>
+        </section>
+      )}
+
+      {editDraft && (
+        <div className="confirmation-backdrop" role="presentation">
+          <section className="confirmation-dialog ticket-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-ticket-title">
+            <p className="eyebrow">Ticket correction</p>
+            <h2 id="edit-ticket-title">Edit ticket for &quot;{editDraft.originalName}&quot;</h2>
+            <form className="ticket-edit-form" onSubmit={saveTicketEdit}>
+              <label htmlFor="edit-guest-name">Guest name</label>
+              <input id="edit-guest-name" value={editDraft.guestName} maxLength={120} onChange={(event) => {
+                setEditDraft((current) => current ? { ...current, guestName: event.target.value } : current);
+                setEditError("");
+              }} />
+              <label htmlFor="edit-referee-name">Referee name</label>
+              <input id="edit-referee-name" value={editDraft.refereeName} maxLength={120} onChange={(event) => {
+                setEditDraft((current) => current ? { ...current, refereeName: event.target.value } : current);
+                setEditError("");
+              }} />
+              <label htmlFor="edit-ticket-type">Ticket type</label>
+              <select id="edit-ticket-type" value={editDraft.ticketType} disabled={editDraft.typeLocked} onChange={(event) => {
+                setEditDraft((current) => current ? { ...current, ticketType: event.target.value } : current);
+                setEditError("");
+              }}>
+                <option>General admission</option>
+                <option>VIP</option>
+              </select>
+              {editDraft.typeLocked && <p className="permission-note">Ticket type is locked after check-in. Names can still be corrected.</p>}
+              {editDraft.status === "CANCELLED" && <p className="permission-note">Editing does not restore this cancelled ticket.</p>}
+              {editError && <p className="form-error" role="alert">{editError}</p>}
+              <div className="ticket-edit-actions">
+                <button className="button button-secondary" type="button" disabled={isSavingEdit} onClick={() => setEditDraft(null)}>Cancel</button>
+                <button className="button button-primary" type="submit" disabled={isSavingEdit || !editDraft.guestName.trim() || !editDraft.refereeName.trim()}>
+                  {isSavingEdit ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
 
       {cancelCandidate && (

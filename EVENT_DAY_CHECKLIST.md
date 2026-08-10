@@ -2,6 +2,8 @@
 
 Use one printed or shared copy. Assign one person to own changes to scanner mode and synchronization decisions.
 
+Automated checks cover authorization, duplicate protection, offline persistence, and synchronization logic, but they do not replace the unchecked two-phone, camera, airplane-mode reload, or venue-connectivity checks below.
+
 ## Before event
 
 - [ ] Deploy the final verified version.

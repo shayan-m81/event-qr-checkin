@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { OFFLINE_GRANT_PUBLIC_KEY_SPKI } from "../config/offlineGrant";
 import { verifyOfflineGrant } from "./offlineGrant";
 
 let privateKey: CryptoKey;
@@ -36,6 +37,17 @@ beforeAll(async () => {
 });
 
 describe("offline grant verification", () => {
+  it("ships a valid P-256 public verification key", async () => {
+    const bytes = Uint8Array.from(atob(OFFLINE_GRANT_PUBLIC_KEY_SPKI), (character) => character.charCodeAt(0));
+    await expect(crypto.subtle.importKey(
+      "spki",
+      bytes,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"],
+    )).resolves.toBeDefined();
+  });
+
   it("accepts a valid Primary grant", async () => {
     await expect(verifyOfflineGrant(await sign(claims()), now, publicKeySpki)).resolves.toMatchObject({ valid: true });
   });

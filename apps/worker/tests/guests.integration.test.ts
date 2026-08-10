@@ -26,16 +26,16 @@ async function api(path: string, role: Role | null, init: RequestInit = {}): Pro
 async function seedGuests(): Promise<void> {
   await integrationEnv.DB.batch([
     integrationEnv.DB.prepare(`
-      INSERT INTO tickets (token, guest_name, ticket_type)
-      VALUES (?, 'Maya Chen', 'VIP')
+      INSERT INTO tickets (token, guest_name, referee_name, ticket_type)
+      VALUES (?, 'Maya Chen', 'Sam Rivera', 'VIP')
     `).bind(tokens.maya),
     integrationEnv.DB.prepare(`
-      INSERT INTO tickets (token, guest_name, ticket_type)
-      VALUES (?, 'Noah Williams', 'General admission')
+      INSERT INTO tickets (token, guest_name, referee_name, ticket_type)
+      VALUES (?, 'Noah Williams', 'Alex Morgan', 'General admission')
     `).bind(tokens.noah),
     integrationEnv.DB.prepare(`
-      INSERT INTO tickets (token, guest_name, ticket_type, voided_at)
-      VALUES (?, 'Vera Void', 'VIP', '2026-08-08T00:00:00.000Z')
+      INSERT INTO tickets (token, guest_name, referee_name, ticket_type, voided_at)
+      VALUES (?, 'Vera Void', 'Sam Rivera', 'VIP', '2026-08-08T00:00:00.000Z')
     `).bind(tokens.voided),
   ]);
 }
@@ -76,6 +76,8 @@ describe("guest list APIs", () => {
       expect(body.guests[0]).toMatchObject({
         ticketId: mayaId,
         guestName: "Maya Chen",
+        refereeName: "Sam Rivera",
+        createdAt: expect.any(String),
         status: "CHECKED_IN",
         checkinSource: "QR",
       });
@@ -84,6 +86,45 @@ describe("guest list APIs", () => {
       expect(body.canManageTickets).toBe(role === "ADMIN");
     },
   );
+
+  it("filters guests by referee prefix and ticket type", async () => {
+    await seedGuests();
+    const vipBySam = await api("/api/guests?referee=Sam&ticketType=VIP", "PRIMARY_SCANNER");
+    const body = await vipBySam.json() as { guests: Array<{ guestName: string; refereeName: string; ticketType: string }> };
+    expect(body.guests).toEqual([
+      expect.objectContaining({ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "VIP" }),
+      expect.objectContaining({ guestName: "Vera Void", refereeName: "Sam Rivera", ticketType: "VIP" }),
+    ]);
+
+    const general = await api("/api/guests?ticketType=General%20admission", "SECONDARY_SCANNER");
+    await expect(general.json()).resolves.toMatchObject({
+      guests: [{ guestName: "Noah Williams", refereeName: "Alex Morgan" }],
+    });
+  });
+
+  it("filters guests by authoritative check-in status", async () => {
+    await seedGuests();
+    const mayaId = await ticketId(tokens.maya);
+    await integrationEnv.DB.prepare(`
+      INSERT INTO checkins (ticket_id, scanner_role, source)
+      VALUES (?, 'PRIMARY_SCANNER', 'QR')
+    `).bind(mayaId).run();
+
+    await expect((await api("/api/guests?status=CHECKED_IN", "ADMIN")).json()).resolves.toMatchObject({
+      guests: [{ guestName: "Maya Chen", status: "CHECKED_IN" }],
+    });
+    await expect((await api("/api/guests?status=NOT_ARRIVED", "PRIMARY_SCANNER")).json()).resolves.toMatchObject({
+      guests: [{ guestName: "Noah Williams", status: "NOT_ARRIVED" }],
+    });
+    await expect((await api("/api/guests?status=CANCELLED", "SECONDARY_SCANNER")).json()).resolves.toMatchObject({
+      guests: [{ guestName: "Vera Void", status: "CANCELLED" }],
+    });
+  });
+
+  it("rejects malformed guest ticket-type filters", async () => {
+    expect((await api("/api/guests?ticketType=Backstage", "ADMIN")).status).toBe(400);
+    expect((await api("/api/guests?status=UNKNOWN", "ADMIN")).status).toBe(400);
+  });
 
   it("returns active-ticket totals from D1", async () => {
     await seedGuests();

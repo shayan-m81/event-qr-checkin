@@ -24,9 +24,14 @@ Build a small, production-ready application for creating party tickets and check
 
 - Store each ticket in D1 with a stable internal identifier and a unique, non-guessable QR credential.
 - Store the guest information needed for the guest list and ticket image.
+- Store a referee name with each ticket so Admin can reuse previously entered names and staff can filter the guest list by referee or ticket type.
+- Allow staff to filter the authoritative guest list by checked-in, not-arrived, or cancelled status.
 - Generate a downloadable or shareable ticket image containing the QR code and human-readable guest/event information.
+- Render the guest name, referee name, and the server-created purchase date in Jalali `YYYY/MM/DD` format on the ticket artwork, using dedicated General and VIP/Special Guest templates.
+- Allow an administrator to regenerate and download ticket artwork from the latest saved ticket details without storing PNG files or replacing the QR token.
 - A QR payload must identify or authenticate a ticket without exposing unnecessary guest data.
 - Allow an administrator to cancel a ticket without deleting or replacing it, and to restore it only if it has never checked in.
+- Allow an administrator to correct a ticket's guest name, referee name, and pre-check-in ticket type without changing its ID, QR token, creation date, cancellation state, or check-in state. Lock ticket-type changes after check-in and do not hard-delete tickets.
 - Keep cancelled tickets visible and reject them consistently in online, manual, and refreshed offline validation.
 
 ### Online check-in
