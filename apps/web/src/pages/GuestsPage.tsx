@@ -29,6 +29,7 @@ type Feedback = {
 } | null;
 
 type TicketTypeFilter = "ALL" | "VIP" | "GENERAL";
+type GuestStatusFilter = "ALL" | GuestStatus;
 
 type EditableTicket = {
   id: number;
@@ -80,8 +81,10 @@ export function GuestsPage() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [totals, setTotals] = useState<Totals>(emptyTotals);
   const [query, setQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [refereeFilter, setRefereeFilter] = useState("");
   const [ticketTypeFilter, setTicketTypeFilter] = useState<TicketTypeFilter>("ALL");
+  const [statusFilter, setStatusFilter] = useState<GuestStatusFilter>("ALL");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [canManualCheckIn, setCanManualCheckIn] = useState(false);
   const [canManageTickets, setCanManageTickets] = useState(false);
@@ -114,6 +117,7 @@ export function GuestsPage() {
         if (refereeFilter.trim()) params.set("referee", refereeFilter.trim());
         if (ticketTypeFilter === "VIP") params.set("ticketType", "VIP");
         if (ticketTypeFilter === "GENERAL") params.set("ticketType", "General admission");
+        if (statusFilter !== "ALL") params.set("status", statusFilter);
         const response = await requestWithTimeout(`/api/guests?${params.toString()}`, {
           signal: controller.signal,
         });
@@ -136,7 +140,7 @@ export function GuestsPage() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [query, refereeFilter, ticketTypeFilter, refreshVersion]);
+  }, [query, refereeFilter, ticketTypeFilter, statusFilter, refreshVersion]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -184,6 +188,9 @@ export function GuestsPage() {
     () => guests.find((guest) => guest.ticketId === selectedId) ?? null,
     [guests, selectedId],
   );
+  const activeFilterCount = Number(Boolean(refereeFilter.trim()))
+    + Number(ticketTypeFilter !== "ALL")
+    + Number(statusFilter !== "ALL");
 
   async function manualCheckIn(guest: Guest) {
     if (!canManualCheckIn || manualCheckinLock.current) return;
@@ -396,43 +403,73 @@ export function GuestsPage() {
         />
       </label>
 
-      <section className="guest-filters" aria-labelledby="guest-filters-title">
-        <p id="guest-filters-title" className="eyebrow">Filter guests</p>
-        <label className="search-field" htmlFor="guest-referee-filter">
-          <span className="sr-only">Filter by referee name</span>
-          <i aria-hidden="true">⌕</i>
-          <input
-            id="guest-referee-filter"
-            aria-label="Filter by referee name"
-            placeholder="Referee name"
-            value={refereeFilter}
-            maxLength={120}
-            onChange={(event) => {
-              setRefereeFilter(event.target.value);
-              setFeedback(null);
-            }}
-          />
-        </label>
-        <div className="guest-type-filters" aria-label="Filter by ticket type">
-          {([
-            ["ALL", "All"],
-            ["VIP", "VIP"],
-            ["GENERAL", "General"],
-          ] as const).map(([value, label]) => (
+      <section className={`guest-filters ${filtersOpen ? "open" : ""}`} aria-label="Guest filters">
+        <button
+          className="guest-filter-toggle"
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls="guest-filter-controls"
+          aria-label={`Filters, ${activeFilterCount > 0 ? `${activeFilterCount} active` : "All guests"}`}
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <span><strong>Filters</strong><small>{activeFilterCount > 0 ? `${activeFilterCount} active` : "All guests"}</small></span>
+          <i aria-hidden="true">⌄</i>
+        </button>
+        {filtersOpen && (
+          <div id="guest-filter-controls" className="guest-filter-controls">
+            <label htmlFor="guest-referee-filter">
+              <span>Referee name</span>
+              <input
+                id="guest-referee-filter"
+                placeholder="Any referee"
+                value={refereeFilter}
+                maxLength={120}
+                onChange={(event) => {
+                  setRefereeFilter(event.target.value);
+                  setFeedback(null);
+                }}
+              />
+            </label>
+            <div className="guest-filter-selects">
+              <label htmlFor="guest-ticket-type-filter">
+                <span>Ticket type</span>
+                <select id="guest-ticket-type-filter" value={ticketTypeFilter} onChange={(event) => {
+                  setTicketTypeFilter(event.target.value as TicketTypeFilter);
+                  setFeedback(null);
+                }}>
+                  <option value="ALL">All ticket types</option>
+                  <option value="VIP">VIP</option>
+                  <option value="GENERAL">General</option>
+                </select>
+              </label>
+              <label htmlFor="guest-status-filter">
+                <span>Guest status</span>
+                <select id="guest-status-filter" value={statusFilter} onChange={(event) => {
+                  setStatusFilter(event.target.value as GuestStatusFilter);
+                  setFeedback(null);
+                }}>
+                  <option value="ALL">All statuses</option>
+                  <option value="CHECKED_IN">Checked in</option>
+                  <option value="NOT_ARRIVED">Not arrived</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </label>
+            </div>
             <button
-              key={value}
+              className="guest-filter-clear"
               type="button"
-              className={ticketTypeFilter === value ? "active" : ""}
-              aria-pressed={ticketTypeFilter === value}
+              disabled={activeFilterCount === 0}
               onClick={() => {
-                setTicketTypeFilter(value);
+                setRefereeFilter("");
+                setTicketTypeFilter("ALL");
+                setStatusFilter("ALL");
                 setFeedback(null);
               }}
             >
-              {label}
+              Clear filters
             </button>
-          ))}
-        </div>
+          </div>
+        )}
       </section>
 
       {feedback && <div className={`guest-feedback ${feedback.tone}`} role="status">{feedback.message}</div>}

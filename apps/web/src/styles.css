@@ -194,11 +194,20 @@ label { color: #d9dcdf; font-size: 13px; font-weight: 700; }
 .search-field { position: relative; display: block; }
 .search-field i { position: absolute; top: 50%; left: 15px; color: var(--muted); font-size: 24px; font-style: normal; transform: translateY(-52%); }
 .search-field input { padding-left: 46px; }
-.guest-filters { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
-.guest-filters > p { margin: 0; }
-.guest-type-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.guest-type-filters button { min-height: 46px; padding: 9px; border: 1px solid #34393e; border-radius: 9px; color: var(--muted); background: #0c0e0f; font-size: 12px; font-weight: 800; }
-.guest-type-filters button.active { border-color: #286642; color: var(--green); background: rgba(57, 229, 129, .08); }
+.guest-filters { overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+.guest-filters.open { border-color: #42484d; }
+.guest-filter-toggle { display: flex; width: 100%; min-height: 58px; padding: 11px 14px; align-items: center; justify-content: space-between; border: 0; color: var(--white); background: transparent; text-align: left; }
+.guest-filter-toggle > span { display: grid; gap: 2px; }
+.guest-filter-toggle strong { font-size: 13px; }
+.guest-filter-toggle small { color: var(--muted); font-size: 10px; }
+.guest-filter-toggle i { color: var(--muted); font-size: 22px; font-style: normal; transform: rotate(0deg); }
+.guest-filters.open .guest-filter-toggle i { transform: rotate(180deg); }
+.guest-filter-controls { display: grid; padding: 13px; gap: 12px; border-top: 1px solid var(--line); }
+.guest-filter-controls label { display: grid; gap: 6px; }
+.guest-filter-controls label > span { color: #c7ccd0; font-size: 10px; font-weight: 800; }
+.guest-filter-selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.guest-filter-clear { min-height: 46px; border: 1px solid #34393e; border-radius: 9px; color: #d9dddf; background: #0c0e0f; font-size: 11px; font-weight: 800; }
+.guest-filter-clear:disabled { color: #666d73; }
 .guest-list { display: grid; gap: 8px; }
 .guest-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; width: 100%; min-height: 72px; padding: 11px; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 11px; color: var(--white); background: var(--surface); text-align: left; }
 .guest-row.selected { border-color: #586068; background: var(--surface-raised); }

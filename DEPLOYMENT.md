@@ -9,7 +9,7 @@ Do not deploy until all of these are true:
 - Wrangler is authenticated to the intended Cloudflare account.
 - `wrangler.jsonc` contains the real production D1 UUID, not `00000000-0000-0000-0000-000000000000`.
 - The five required Worker secrets exist, including the offline-grant P-256 private key.
-- `OFFLINE_GRANT_PUBLIC_KEY_SPKI` is present in the frontend build environment and matches the private key.
+- `apps/web/offline-grant-public.spki.b64` contains the public key matching the Worker private key.
 - `npm run verify` passes.
 - The remote database export and Time Travel bookmark have been recorded before migration.
 
@@ -112,13 +112,13 @@ npx wrangler secret put OFFLINE_GRANT_PRIVATE_KEY < "$offline_key_dir/offline-gr
 
 For local development, copy the one-line private PKCS#8 value into `OFFLINE_GRANT_PRIVATE_KEY` in `.dev.vars`. Never commit that value.
 
-Export the public key for every frontend production build and CI build:
+Copy the public key into the tracked frontend build configuration:
 
 ```sh
-export OFFLINE_GRANT_PUBLIC_KEY_SPKI="$(tr -d '\n' < "$offline_key_dir/offline-grant-public.spki.b64")"
+cp "$offline_key_dir/offline-grant-public.spki.b64" apps/web/offline-grant-public.spki.b64
 ```
 
-The public value is not secret, but it must match the Worker private key. Store the private key in an approved secret manager, remove temporary key files using the organization's secure-file procedure, and never commit the private PEM or PKCS#8 value. Rotating this pair requires setting the new Worker secret and rebuilding/deploying the frontend with the matching public key; existing offline grants then stop verifying.
+The public value is not secret and is committed so local, CI, and production builds all use the same verification key. The build fails if this file is missing or malformed. It must match the Worker private key. Store the private key in an approved secret manager, remove temporary private-key files using the organization's secure-file procedure, and never commit the private PEM or PKCS#8 value. Rotating this pair requires updating the committed public key, setting the new Worker secret, and deploying both together; existing offline grants then stop verifying.
 
 ### Configure all Worker secrets
 

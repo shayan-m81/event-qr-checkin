@@ -102,8 +102,28 @@ describe("guest list APIs", () => {
     });
   });
 
+  it("filters guests by authoritative check-in status", async () => {
+    await seedGuests();
+    const mayaId = await ticketId(tokens.maya);
+    await integrationEnv.DB.prepare(`
+      INSERT INTO checkins (ticket_id, scanner_role, source)
+      VALUES (?, 'PRIMARY_SCANNER', 'QR')
+    `).bind(mayaId).run();
+
+    await expect((await api("/api/guests?status=CHECKED_IN", "ADMIN")).json()).resolves.toMatchObject({
+      guests: [{ guestName: "Maya Chen", status: "CHECKED_IN" }],
+    });
+    await expect((await api("/api/guests?status=NOT_ARRIVED", "PRIMARY_SCANNER")).json()).resolves.toMatchObject({
+      guests: [{ guestName: "Noah Williams", status: "NOT_ARRIVED" }],
+    });
+    await expect((await api("/api/guests?status=CANCELLED", "SECONDARY_SCANNER")).json()).resolves.toMatchObject({
+      guests: [{ guestName: "Vera Void", status: "CANCELLED" }],
+    });
+  });
+
   it("rejects malformed guest ticket-type filters", async () => {
     expect((await api("/api/guests?ticketType=Backstage", "ADMIN")).status).toBe(400);
+    expect((await api("/api/guests?status=UNKNOWN", "ADMIN")).status).toBe(400);
   });
 
   it("returns active-ticket totals from D1", async () => {

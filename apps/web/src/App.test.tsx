@@ -288,17 +288,18 @@ describe("Admin ticket referee workflow", () => {
     expect(await screen.findByText(/created for Taylor Reed/i)).toBeInTheDocument();
   });
 
-  it("shows ticket details and filters the guest list by referee and type", async () => {
+  it("shows ticket details and filters the guest list by referee, type, and status", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input), "https://party.test");
       const path = url.pathname;
       if (path === "/api/auth/session") return json({ authenticated: true, role: "ADMIN" });
-      if (path === "/api/guests/totals") return json({ totalTickets: 2, checkedInCount: 0, remainingCount: 2 });
+      if (path === "/api/guests/totals") return json({ totalTickets: 2, checkedInCount: 1, remainingCount: 1 });
       if (path === "/api/offline/conflicts") return json({ conflicts: [] });
       if (path === "/api/guests") {
         const referee = url.searchParams.get("referee")?.toLocaleLowerCase() ?? "";
         const type = url.searchParams.get("ticketType") ?? "";
+        const status = url.searchParams.get("status") ?? "";
         return json({
           guests: existingTickets
             .filter((ticket) => ticket.refereeName.toLocaleLowerCase().startsWith(referee))
@@ -309,10 +310,11 @@ describe("Admin ticket referee workflow", () => {
               refereeName: ticket.refereeName,
               ticketType: ticket.ticketType,
               createdAt: ticket.createdAt,
-              status: "NOT_ARRIVED",
-              checkedInAt: null,
-              checkinSource: null,
-            })),
+              status: ticket.id === 1 ? "CHECKED_IN" : "NOT_ARRIVED",
+              checkedInAt: ticket.id === 1 ? "2026-08-10T11:00:00.000Z" : null,
+              checkinSource: ticket.id === 1 ? "QR" : null,
+            }))
+            .filter((guest) => !status || guest.status === status),
           canManualCheckIn: true,
           canManageTickets: true,
         });
@@ -324,17 +326,30 @@ describe("Admin ticket referee workflow", () => {
 
     expect((await screen.findAllByText(/Sam Rivera/)).length).toBeGreaterThan(0);
     expect(await screen.findByText("1405/05/19")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Filter by referee name"), "Alex");
+    await user.click(screen.getByRole("button", { name: /filters, all guests/i }));
+    await user.type(screen.getByLabelText("Referee name"), "Alex");
     await waitFor(() => expect(screen.queryByText("Maya Chen")).not.toBeInTheDocument());
     expect(screen.getAllByText("Noah Williams").length).toBeGreaterThan(0);
 
-    await user.clear(screen.getByLabelText("Filter by referee name"));
-    await user.click(screen.getByRole("button", { name: "VIP" }));
+    await user.clear(screen.getByLabelText("Referee name"));
+    await user.selectOptions(screen.getByLabelText("Ticket type"), "VIP");
     await waitFor(() => expect(screen.queryByText("Noah Williams")).not.toBeInTheDocument());
     expect(screen.getAllByText("Maya Chen").length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: "General" }));
+    await user.selectOptions(screen.getByLabelText("Ticket type"), "GENERAL");
     await waitFor(() => expect(screen.queryByText("Maya Chen")).not.toBeInTheDocument());
     expect(screen.getAllByText("Noah Williams").length).toBeGreaterThan(0);
+
+    await user.selectOptions(screen.getByLabelText("Ticket type"), "ALL");
+    await user.selectOptions(screen.getByLabelText("Guest status"), "CHECKED_IN");
+    await waitFor(() => expect(screen.queryByText("Noah Williams")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Maya Chen").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /filters, 1 active/i })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Guest status"), "NOT_ARRIVED");
+    await waitFor(() => expect(screen.queryByText("Maya Chen")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Noah Williams").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(screen.getAllByText("Maya Chen").length).toBeGreaterThan(0));
+    expect(screen.getByRole("button", { name: /filters, all guests/i })).toBeInTheDocument();
   });
 });
 

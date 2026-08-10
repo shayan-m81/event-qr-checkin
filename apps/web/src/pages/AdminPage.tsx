@@ -132,7 +132,6 @@ export function AdminPage() {
     >
       <section className="card form-card" aria-labelledby="ticket-form-title">
         <div className="section-heading">
-          <span className="step-number">01</span>
           <div>
             <h2 id="ticket-form-title">Guest details</h2>
             <p>Create one admission ticket at a time.</p>

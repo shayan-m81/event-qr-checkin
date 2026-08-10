@@ -7,6 +7,7 @@ import { AUTHENTICATED_STAFF } from "./permissions";
 const GUEST_RESULT_LIMIT = 200;
 const MAX_SEARCH_LENGTH = 120;
 const ticketTypes = ["General admission", "VIP"] as const;
+const guestStatuses = ["CHECKED_IN", "NOT_ARRIVED", "CANCELLED"] as const;
 
 type GuestRow = {
   ticket_id: number;
@@ -47,11 +48,15 @@ async function listGuests(request: Request, env: Env, session: Session): Promise
   const query = (searchParams.get("query") ?? "").trim().replace(/\s+/g, " ");
   const referee = (searchParams.get("referee") ?? "").trim().replace(/\s+/g, " ");
   const ticketType = (searchParams.get("ticketType") ?? "").trim();
+  const status = (searchParams.get("status") ?? "").trim();
   if (query.length > MAX_SEARCH_LENGTH || referee.length > MAX_SEARCH_LENGTH) {
     return json({ error: "invalid_search" }, 400);
   }
   if (ticketType && !ticketTypes.includes(ticketType as (typeof ticketTypes)[number])) {
     return json({ error: "invalid_ticket_type" }, 400);
+  }
+  if (status && !guestStatuses.includes(status as (typeof guestStatuses)[number])) {
+    return json({ error: "invalid_status" }, 400);
   }
 
   const conditions: string[] = [];
@@ -67,6 +72,13 @@ async function listGuests(request: Request, env: Env, session: Session): Promise
   if (ticketType) {
     conditions.push("tickets.ticket_type = ?");
     bindings.push(ticketType);
+  }
+  if (status === "CHECKED_IN") {
+    conditions.push("tickets.voided_at IS NULL", "checkins.id IS NOT NULL");
+  } else if (status === "NOT_ARRIVED") {
+    conditions.push("tickets.voided_at IS NULL", "checkins.id IS NULL");
+  } else if (status === "CANCELLED") {
+    conditions.push("tickets.voided_at IS NOT NULL");
   }
   bindings.push(GUEST_RESULT_LIMIT);
 
@@ -92,6 +104,7 @@ async function listGuests(request: Request, env: Env, session: Session): Promise
     query,
     referee,
     ticketType,
+    status,
     canManualCheckIn: session.role === "ADMIN",
     canManageTickets: session.role === "ADMIN",
   });

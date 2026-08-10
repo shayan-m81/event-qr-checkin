@@ -1,15 +1,21 @@
 import react from "@vitejs/plugin-react";
-import { loadEnv } from "vite";
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
 
 const buildId = new Date().toISOString()
   .replace(/[-:]/g, "")
   .replace("T", "-")
   .slice(0, 13);
+const offlineGrantPublicKeySpki = readFileSync(
+  new URL("./offline-grant-public.spki.b64", import.meta.url),
+  "utf8",
+).trim();
 
-export default defineConfig(({ mode }) => {
-  const environment = loadEnv(mode, process.cwd(), "");
-  return {
+if (!/^MFkw[A-Za-z0-9+/]+={0,2}$/.test(offlineGrantPublicKeySpki)) {
+  throw new Error("apps/web/offline-grant-public.spki.b64 must contain a valid base64 P-256 SPKI public key");
+}
+
+export default defineConfig({
   plugins: [
     react(),
     {
@@ -28,7 +34,7 @@ export default defineConfig(({ mode }) => {
   ],
   define: {
     __APP_BUILD_ID__: JSON.stringify(buildId),
-    __OFFLINE_GRANT_PUBLIC_KEY_SPKI__: JSON.stringify(environment.OFFLINE_GRANT_PUBLIC_KEY_SPKI ?? ""),
+    __OFFLINE_GRANT_PUBLIC_KEY_SPKI__: JSON.stringify(offlineGrantPublicKeySpki),
   },
   test: {
     environment: "jsdom",
@@ -36,5 +42,4 @@ export default defineConfig(({ mode }) => {
     // Browser IndexedDB is one shared per-origin database; serialize files that exercise it.
     fileParallelism: false,
   },
-  };
 });

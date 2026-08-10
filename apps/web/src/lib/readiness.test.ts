@@ -65,6 +65,20 @@ describe("event readiness evaluation", () => {
     expect(result.items.find((item) => item.id === "offline-authorization")).toMatchObject({ status: "FAIL" });
   });
 
+  it("lets ADMIN inspect readiness without receiving or requiring a Primary grant", () => {
+    const result = evaluateReadiness({
+      ...readyInput,
+      role: "ADMIN",
+      offlineAuthorization: { valid: false, reason: "MISSING", detail: "No offline grant prepared" },
+    });
+    expect(result.ready).toBe(true);
+    expect(result.items.find((item) => item.id === "offline-authorization")).toMatchObject({
+      status: "WARNING",
+      value: "PRIMARY LOGIN REQUIRED",
+    });
+    expect(result.actions).not.toContain("Prepare this device for offline use");
+  });
+
   it("fails when the Service Worker or app shell is unavailable", () => {
     const result = evaluateReadiness({
       ...readyInput,
