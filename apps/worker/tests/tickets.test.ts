@@ -98,7 +98,7 @@ async function apiRequest(
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (role) headers.set("Cookie", await roleCookie(role));
-  if (init.method === "POST") headers.set("Origin", "https://party.test");
+  if (init.method && init.method !== "GET") headers.set("Origin", "https://party.test");
   return worker.fetch(new Request(`https://party.test${path}`, { ...init, headers }), env);
 }
 
@@ -148,6 +148,9 @@ describe("ticket API", () => {
     expect((await apiRequest(env, "/api/tickets", null)).status).toBe(401);
     expect((await apiRequest(env, "/api/tickets", "PRIMARY_SCANNER")).status).toBe(403);
     expect((await apiRequest(env, "/api/tickets/1", "SECONDARY_SCANNER")).status).toBe(403);
+    expect((await apiRequest(env, "/api/tickets/1", null, { method: "PATCH" })).status).toBe(401);
+    expect((await apiRequest(env, "/api/tickets/1", "PRIMARY_SCANNER", { method: "PATCH" })).status).toBe(403);
+    expect((await apiRequest(env, "/api/tickets/1", "SECONDARY_SCANNER", { method: "PATCH" })).status).toBe(403);
     expect((await apiRequest(env, "/api/tickets/1/cancel", "PRIMARY_SCANNER", { method: "POST" })).status).toBe(403);
     expect((await apiRequest(env, "/api/tickets/1/cancel", "SECONDARY_SCANNER", { method: "POST" })).status).toBe(403);
     expect((await apiRequest(env, "/api/tickets/1/restore", "PRIMARY_SCANNER", { method: "POST" })).status).toBe(403);

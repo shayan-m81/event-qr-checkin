@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "../components/AppShell";
 import { formatJalaliDate, formatJalaliDateTime } from "../lib/jalaliDate";
 import { requestWithTimeout } from "../lib/request";
+import { renderTicketImage, ticketDownloadName } from "../lib/ticketImage";
 
 type GuestStatus = "CHECKED_IN" | "NOT_ARRIVED" | "CANCELLED";
 
@@ -28,6 +29,26 @@ type Feedback = {
 } | null;
 
 type TicketTypeFilter = "ALL" | "VIP" | "GENERAL";
+
+type EditableTicket = {
+  id: number;
+  token: string;
+  guestName: string;
+  refereeName: string;
+  ticketType: string;
+  createdAt: string;
+  voidedAt: string | null;
+};
+
+type EditDraft = {
+  ticketId: number;
+  originalName: string;
+  guestName: string;
+  refereeName: string;
+  ticketType: string;
+  status: GuestStatus;
+  typeLocked: boolean;
+};
 
 type OfflineConflict = {
   client_operation_id: string;
@@ -68,11 +89,18 @@ export function GuestsPage() {
   const [manualTicketId, setManualTicketId] = useState<number | null>(null);
   const [managingTicketId, setManagingTicketId] = useState<number | null>(null);
   const [cancelCandidate, setCancelCandidate] = useState<Guest | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [updatedTicket, setUpdatedTicket] = useState<EditableTicket | null>(null);
+  const [isUpdatedImageReady, setIsUpdatedImageReady] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [loadError, setLoadError] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [offlineConflicts, setOfflineConflicts] = useState<OfflineConflict[]>([]);
   const manualCheckinLock = useRef(false);
+  const editLock = useRef(false);
+  const updatedCanvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -136,6 +164,20 @@ export function GuestsPage() {
       setSelectedId(guests[0]?.ticketId ?? null);
     }
   }, [guests, selectedId]);
+
+  useEffect(() => {
+    if (!updatedTicket || !updatedCanvasRef.current) return;
+    let cancelled = false;
+    setIsUpdatedImageReady(false);
+    void renderTicketImage(updatedCanvasRef.current, updatedTicket)
+      .then(() => {
+        if (!cancelled) setIsUpdatedImageReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setFeedback({ tone: "danger", message: "The correction was saved, but the updated PNG could not be rendered." });
+      });
+    return () => { cancelled = true; };
+  }, [updatedTicket]);
 
   const selectedGuest = useMemo(
     () => guests.find((guest) => guest.ticketId === selectedId) ?? null,
@@ -203,6 +245,91 @@ export function GuestsPage() {
     } finally {
       setManagingTicketId(null);
     }
+  }
+
+  function beginEdit(guest: Guest) {
+    setUpdatedTicket(null);
+    setEditError("");
+    setFeedback(null);
+    setEditDraft({
+      ticketId: guest.ticketId,
+      originalName: guest.guestName,
+      guestName: guest.guestName,
+      refereeName: guest.refereeName,
+      ticketType: guest.ticketType,
+      status: guest.status,
+      typeLocked: guest.checkedInAt !== null,
+    });
+  }
+
+  async function saveTicketEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManageTickets || !editDraft || editLock.current) return;
+    const guestName = editDraft.guestName.trim();
+    const refereeName = editDraft.refereeName.trim();
+    if (!guestName || !refereeName) {
+      setEditError("Guest name and referee name are required.");
+      return;
+    }
+    editLock.current = true;
+    setIsSavingEdit(true);
+    setEditError("");
+    try {
+      const response = await requestWithTimeout(`/api/tickets/${editDraft.ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestName, refereeName, ticketType: editDraft.ticketType }),
+      });
+      const body = await response.json().catch(() => ({})) as { ticket?: EditableTicket; error?: string };
+      if (response.status === 409 && body.error === "ticket_type_locked") {
+        setEditError("Ticket type cannot be changed after check-in. Keep the original type to save name corrections.");
+        return;
+      }
+      if (!response.ok || !body.ticket) {
+        if (response.status === 401 || response.status === 403) {
+          setEditError("Your admin session has expired. Sign in again.");
+        } else if (body.error === "invalid_guest_name") {
+          setEditError("Enter a guest name between 1 and 120 characters.");
+        } else if (body.error === "invalid_referee_name") {
+          setEditError("Enter a referee name between 1 and 120 characters.");
+        } else {
+          setEditError("The ticket could not be updated. No changes were made.");
+        }
+        return;
+      }
+      const ticket = body.ticket;
+      setGuests((current) => current.map((guest) => guest.ticketId === ticket.id
+        ? { ...guest, guestName: ticket.guestName, refereeName: ticket.refereeName, ticketType: ticket.ticketType }
+        : guest));
+      setUpdatedTicket(ticket);
+      setEditDraft(null);
+      setFeedback({
+        tone: "success",
+        message: `${ticket.guestName}’s ticket was corrected. The QR code is unchanged. Refresh the Primary Scanner offline cache before offline use.`,
+      });
+      setRefreshVersion((version) => version + 1);
+    } catch {
+      setEditError("Couldn’t connect. No ticket details were changed.");
+    } finally {
+      editLock.current = false;
+      setIsSavingEdit(false);
+    }
+  }
+
+  function downloadUpdatedTicket() {
+    if (!updatedTicket || !updatedCanvasRef.current || !isUpdatedImageReady) return;
+    updatedCanvasRef.current.toBlob((blob) => {
+      if (!blob) {
+        setFeedback({ tone: "danger", message: "This browser could not create the updated PNG." });
+        return;
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = ticketDownloadName(updatedTicket.guestName);
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+    }, "image/png");
   }
 
   return (
@@ -349,22 +476,85 @@ export function GuestsPage() {
             <p className="permission-note">Scanner accounts can search guests. Manual check-in requires an admin.</p>
           )}
           {canManageTickets && (
-            <button
-              className={selectedGuest.status === "CANCELLED" ? "button button-secondary" : "button button-danger"}
-              type="button"
-              disabled={managingTicketId !== null || manualTicketId !== null}
-              onClick={() => selectedGuest.status === "CANCELLED"
-                ? void manageTicket(selectedGuest, "restore")
-                : setCancelCandidate(selectedGuest)}
-            >
-              {managingTicketId === selectedGuest.ticketId
-                ? "Updating ticket…"
-                : selectedGuest.status === "CANCELLED"
-                  ? "Restore Ticket"
-                  : "Cancel Ticket"}
-            </button>
+            <div className="ticket-management-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit}
+                onClick={() => beginEdit(selectedGuest)}
+              >
+                Edit Ticket
+              </button>
+              <button
+                className={selectedGuest.status === "CANCELLED" ? "button button-secondary" : "button button-danger"}
+                type="button"
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit}
+                onClick={() => selectedGuest.status === "CANCELLED"
+                  ? void manageTicket(selectedGuest, "restore")
+                  : setCancelCandidate(selectedGuest)}
+              >
+                {managingTicketId === selectedGuest.ticketId
+                  ? "Updating ticket…"
+                  : selectedGuest.status === "CANCELLED"
+                    ? "Restore Ticket"
+                    : "Cancel Ticket"}
+              </button>
+            </div>
           )}
         </section>
+      )}
+
+      {updatedTicket && (
+        <section className="updated-ticket" aria-labelledby="updated-ticket-title">
+          <div>
+            <p className="eyebrow">Corrected ticket</p>
+            <h2 id="updated-ticket-title">Download the updated artwork</h2>
+            <p>The ticket ID, QR code, purchase date, and check-in state are unchanged.</p>
+            {updatedTicket.voidedAt && <p className="orange-text">This ticket is still cancelled until you restore it.</p>}
+          </div>
+          <canvas ref={updatedCanvasRef} className="ticket-canvas" aria-label={`Updated ticket preview for ${updatedTicket.guestName}`} />
+          <button className="button button-secondary" type="button" disabled={!isUpdatedImageReady} onClick={downloadUpdatedTicket}>
+            Download Updated Ticket <span aria-hidden="true">↓</span>
+          </button>
+        </section>
+      )}
+
+      {editDraft && (
+        <div className="confirmation-backdrop" role="presentation">
+          <section className="confirmation-dialog ticket-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-ticket-title">
+            <p className="eyebrow">Ticket correction</p>
+            <h2 id="edit-ticket-title">Edit ticket for &quot;{editDraft.originalName}&quot;</h2>
+            <form className="ticket-edit-form" onSubmit={saveTicketEdit}>
+              <label htmlFor="edit-guest-name">Guest name</label>
+              <input id="edit-guest-name" value={editDraft.guestName} maxLength={120} onChange={(event) => {
+                setEditDraft((current) => current ? { ...current, guestName: event.target.value } : current);
+                setEditError("");
+              }} />
+              <label htmlFor="edit-referee-name">Referee name</label>
+              <input id="edit-referee-name" value={editDraft.refereeName} maxLength={120} onChange={(event) => {
+                setEditDraft((current) => current ? { ...current, refereeName: event.target.value } : current);
+                setEditError("");
+              }} />
+              <label htmlFor="edit-ticket-type">Ticket type</label>
+              <select id="edit-ticket-type" value={editDraft.ticketType} disabled={editDraft.typeLocked} onChange={(event) => {
+                setEditDraft((current) => current ? { ...current, ticketType: event.target.value } : current);
+                setEditError("");
+              }}>
+                <option>General admission</option>
+                <option>VIP</option>
+              </select>
+              {editDraft.typeLocked && <p className="permission-note">Ticket type is locked after check-in. Names can still be corrected.</p>}
+              {editDraft.status === "CANCELLED" && <p className="permission-note">Editing does not restore this cancelled ticket.</p>}
+              {editError && <p className="form-error" role="alert">{editError}</p>}
+              <div className="ticket-edit-actions">
+                <button className="button button-secondary" type="button" disabled={isSavingEdit} onClick={() => setEditDraft(null)}>Cancel</button>
+                <button className="button button-primary" type="submit" disabled={isSavingEdit || !editDraft.guestName.trim() || !editDraft.refereeName.trim()}>
+                  {isSavingEdit ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
 
       {cancelCandidate && (

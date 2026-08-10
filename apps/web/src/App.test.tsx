@@ -376,3 +376,106 @@ describe("ticket cancellation UI", () => {
     ));
   });
 });
+
+describe("ticket correction UI", () => {
+  it("lets ADMIN correct ticket details and offers updated artwork without replacing the QR", async () => {
+    const user = userEvent.setup();
+    const originalTicket = {
+      id: 17,
+      token: "pt_original00000000000000000000000",
+      guestName: "Mya Chen",
+      refereeName: "Sam Rvera",
+      ticketType: "General admission",
+      createdAt: "2026-08-10T10:00:00.000Z",
+      voidedAt: null,
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input), "https://party.test").pathname;
+      if (path === "/api/auth/session") return json({ authenticated: true, role: "ADMIN" });
+      if (path === "/api/guests/totals") return json({ totalTickets: 1, checkedInCount: 0, remainingCount: 1 });
+      if (path === "/api/offline/conflicts") return json({ conflicts: [] });
+      if (path === "/api/tickets/17" && init?.method === "PATCH") {
+        return json({
+          ticket: {
+            ...originalTicket,
+            guestName: "Maya Chen",
+            refereeName: "Sam Rivera",
+            ticketType: "VIP",
+          },
+        });
+      }
+      if (path === "/api/guests") return json({
+        guests: [{
+          ticketId: originalTicket.id,
+          guestName: originalTicket.guestName,
+          refereeName: originalTicket.refereeName,
+          ticketType: originalTicket.ticketType,
+          createdAt: originalTicket.createdAt,
+          status: "NOT_ARRIVED",
+          checkedInAt: null,
+          checkinSource: null,
+        }],
+        canManualCheckIn: true,
+        canManageTickets: true,
+      });
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/guests");
+
+    await user.click(await screen.findByRole("button", { name: "Edit Ticket" }));
+    const dialog = screen.getByRole("dialog", { name: /edit ticket for/i });
+    const guestInput = within(dialog).getByLabelText("Guest name");
+    const refereeInput = within(dialog).getByLabelText("Referee name");
+    await user.clear(guestInput);
+    await user.type(guestInput, "Maya Chen");
+    await user.clear(refereeInput);
+    await user.type(refereeInput, "Sam Rivera");
+    await user.selectOptions(within(dialog).getByLabelText("Ticket type"), "VIP");
+    await user.click(within(dialog).getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tickets/17",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "VIP" }),
+      }),
+    ));
+    expect(await screen.findByRole("heading", { name: "Download the updated artwork" })).toBeInTheDocument();
+    expect(screen.getByText(/QR code is unchanged/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /download updated ticket/i })).toBeEnabled();
+  });
+
+  it("locks ticket type after check-in while allowing name corrections", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input), "https://party.test").pathname;
+      if (path === "/api/auth/session") return json({ authenticated: true, role: "ADMIN" });
+      if (path === "/api/guests/totals") return json({ totalTickets: 1, checkedInCount: 1, remainingCount: 0 });
+      if (path === "/api/offline/conflicts") return json({ conflicts: [] });
+      if (path === "/api/guests") return json({
+        guests: [{
+          ticketId: 18,
+          guestName: "Checked Guest",
+          refereeName: "Sam Rivera",
+          ticketType: "VIP",
+          createdAt: "2026-08-10T10:00:00.000Z",
+          status: "CHECKED_IN",
+          checkedInAt: "2026-08-10T11:00:00.000Z",
+          checkinSource: "QR",
+        }],
+        canManualCheckIn: true,
+        canManageTickets: true,
+      });
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/guests");
+
+    await user.click(await screen.findByRole("button", { name: "Edit Ticket" }));
+    const dialog = screen.getByRole("dialog", { name: /edit ticket for/i });
+    expect(within(dialog).getByLabelText("Ticket type")).toBeDisabled();
+    expect(within(dialog).getByText(/type is locked after check-in/i)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Guest name")).toBeEnabled();
+  });
+});

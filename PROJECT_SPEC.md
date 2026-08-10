@@ -29,6 +29,7 @@ Build a small, production-ready application for creating party tickets and check
 - Render the guest name, referee name, and the server-created purchase date in Jalali `YYYY/MM/DD` format on the ticket artwork, using dedicated General and VIP/Special Guest templates.
 - A QR payload must identify or authenticate a ticket without exposing unnecessary guest data.
 - Allow an administrator to cancel a ticket without deleting or replacing it, and to restore it only if it has never checked in.
+- Allow an administrator to correct a ticket's guest name, referee name, and pre-check-in ticket type without changing its ID, QR token, creation date, cancellation state, or check-in state. Lock ticket-type changes after check-in and do not hard-delete tickets.
 - Keep cancelled tickets visible and reject them consistently in online, manual, and refreshed offline validation.
 
 ### Online check-in
