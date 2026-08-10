@@ -6,6 +6,7 @@ import { App } from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import type { Role } from "./auth/authorization";
 import { checkInOffline, getOfflineSummary, getStoredOfflineGrant, replaceOfflineSnapshot, storeOfflineGrant } from "./lib/offlineStore";
+import { renderTicketImage } from "./lib/ticketImage";
 
 vi.mock("./lib/ticketImage", () => ({
   renderTicketImage: vi.fn().mockResolvedValue(undefined),
@@ -441,9 +442,59 @@ describe("ticket correction UI", () => {
         body: JSON.stringify({ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "VIP" }),
       }),
     ));
-    expect(await screen.findByRole("heading", { name: "Download the updated artwork" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Download current ticket" })).toBeInTheDocument();
     expect(screen.getByText(/QR code is unchanged/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /download updated ticket/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /download ticket png/i })).toBeEnabled();
+  });
+
+  it("regenerates current artwork from the authoritative ticket record after a reload", async () => {
+    const user = userEvent.setup();
+    const currentTicket = {
+      id: 21,
+      token: "pt_preserved0000000000000000000000",
+      guestName: "Maya Chen",
+      refereeName: "Sam Rivera",
+      ticketType: "VIP",
+      createdAt: "2026-08-10T10:00:00.000Z",
+      voidedAt: null,
+    };
+    vi.mocked(renderTicketImage).mockClear();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input), "https://party.test").pathname;
+      if (path === "/api/auth/session") return json({ authenticated: true, role: "ADMIN" });
+      if (path === "/api/guests/totals") return json({ totalTickets: 1, checkedInCount: 0, remainingCount: 1 });
+      if (path === "/api/offline/conflicts") return json({ conflicts: [] });
+      if (path === "/api/tickets/21") return json({ ticket: currentTicket });
+      if (path === "/api/guests") return json({
+        guests: [{
+          ticketId: currentTicket.id,
+          guestName: currentTicket.guestName,
+          refereeName: currentTicket.refereeName,
+          ticketType: currentTicket.ticketType,
+          createdAt: currentTicket.createdAt,
+          status: "NOT_ARRIVED",
+          checkedInAt: null,
+          checkinSource: null,
+        }],
+        canManualCheckIn: true,
+        canManageTickets: true,
+      });
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/guests");
+
+    await user.click(await screen.findByRole("button", { name: "Regenerate Ticket" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tickets/21",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(await screen.findByRole("heading", { name: "Download current ticket" })).toBeInTheDocument();
+    await waitFor(() => expect(renderTicketImage).toHaveBeenCalledWith(
+      expect.any(HTMLCanvasElement),
+      expect.objectContaining({ id: 21, token: currentTicket.token, guestName: "Maya Chen" }),
+    ));
+    expect(screen.getByRole("button", { name: /download ticket png/i })).toBeEnabled();
   });
 
   it("locks ticket type after check-in while allowing name corrections", async () => {

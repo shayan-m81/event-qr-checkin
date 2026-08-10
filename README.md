@@ -14,6 +14,7 @@ Mobile-first party ticketing and QR check-in for event teams. The app combines t
 - Guest search, referee/type filters, authoritative check-in status, totals, and Admin manual check-in.
 - Admin ticket cancellation and restoration without changing the original QR token.
 - Safe Admin corrections for guest/referee details and pre-check-in ticket type, with no hard deletion or QR replacement.
+- Persistent Admin regeneration and download of current ticket artwork without server-side PNG storage.
 - Primary-only emergency offline scanning backed by IndexedDB and a Service Worker shell.
 - Short-lived, asymmetric-signed offline scanner grants; normal authentication remains server-authoritative.
 - Event Readiness screen for cache, camera, Service Worker, synchronization, and offline authorization checks.

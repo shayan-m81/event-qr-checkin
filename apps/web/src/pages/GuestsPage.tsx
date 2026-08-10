@@ -94,6 +94,7 @@ export function GuestsPage() {
   const [editError, setEditError] = useState("");
   const [updatedTicket, setUpdatedTicket] = useState<EditableTicket | null>(null);
   const [isUpdatedImageReady, setIsUpdatedImageReady] = useState(false);
+  const [regeneratingTicketId, setRegeneratingTicketId] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [loadError, setLoadError] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
@@ -316,6 +317,33 @@ export function GuestsPage() {
     }
   }
 
+  async function regenerateTicket(guest: Guest) {
+    if (!canManageTickets || regeneratingTicketId !== null) return;
+    setRegeneratingTicketId(guest.ticketId);
+    setFeedback(null);
+    try {
+      const response = await requestWithTimeout(`/api/tickets/${guest.ticketId}`);
+      const body = await response.json().catch(() => ({})) as { ticket?: EditableTicket };
+      if (!response.ok || !body.ticket) {
+        if (response.status === 401 || response.status === 403) {
+          setFeedback({ tone: "danger", message: "Your admin session has expired. Sign in again." });
+        } else {
+          setFeedback({ tone: "danger", message: "The latest ticket details could not be loaded." });
+        }
+        return;
+      }
+      setUpdatedTicket(body.ticket);
+      setFeedback({
+        tone: "success",
+        message: `${body.ticket.guestName}’s ticket artwork was regenerated from the latest saved details.`,
+      });
+    } catch {
+      setFeedback({ tone: "danger", message: "Couldn’t connect. The ticket artwork was not regenerated." });
+    } finally {
+      setRegeneratingTicketId(null);
+    }
+  }
+
   function downloadUpdatedTicket() {
     if (!updatedTicket || !updatedCanvasRef.current || !isUpdatedImageReady) return;
     updatedCanvasRef.current.toBlob((blob) => {
@@ -421,6 +449,7 @@ export function GuestsPage() {
               className={`guest-row ${selectedId === guest.ticketId ? "selected" : ""}`}
               onClick={() => {
                 setSelectedId(guest.ticketId);
+                setUpdatedTicket(null);
                 setFeedback(null);
               }}
             >
@@ -480,15 +509,23 @@ export function GuestsPage() {
               <button
                 className="button button-secondary"
                 type="button"
-                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit}
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit || regeneratingTicketId !== null}
                 onClick={() => beginEdit(selectedGuest)}
               >
                 Edit Ticket
               </button>
               <button
+                className="button button-secondary"
+                type="button"
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit || regeneratingTicketId !== null}
+                onClick={() => void regenerateTicket(selectedGuest)}
+              >
+                {regeneratingTicketId === selectedGuest.ticketId ? "Regenerating…" : "Regenerate Ticket"}
+              </button>
+              <button
                 className={selectedGuest.status === "CANCELLED" ? "button button-secondary" : "button button-danger"}
                 type="button"
-                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit}
+                disabled={managingTicketId !== null || manualTicketId !== null || isSavingEdit || regeneratingTicketId !== null}
                 onClick={() => selectedGuest.status === "CANCELLED"
                   ? void manageTicket(selectedGuest, "restore")
                   : setCancelCandidate(selectedGuest)}
@@ -507,14 +544,14 @@ export function GuestsPage() {
       {updatedTicket && (
         <section className="updated-ticket" aria-labelledby="updated-ticket-title">
           <div>
-            <p className="eyebrow">Corrected ticket</p>
-            <h2 id="updated-ticket-title">Download the updated artwork</h2>
-            <p>The ticket ID, QR code, purchase date, and check-in state are unchanged.</p>
+            <p className="eyebrow">Ticket artwork</p>
+            <h2 id="updated-ticket-title">Download current ticket</h2>
+            <p>Generated from the latest saved details. The ticket ID, QR code, purchase date, and check-in state are unchanged.</p>
             {updatedTicket.voidedAt && <p className="orange-text">This ticket is still cancelled until you restore it.</p>}
           </div>
           <canvas ref={updatedCanvasRef} className="ticket-canvas" aria-label={`Updated ticket preview for ${updatedTicket.guestName}`} />
           <button className="button button-secondary" type="button" disabled={!isUpdatedImageReady} onClick={downloadUpdatedTicket}>
-            Download Updated Ticket <span aria-hidden="true">↓</span>
+            Download Ticket PNG <span aria-hidden="true">↓</span>
           </button>
         </section>
       )}
