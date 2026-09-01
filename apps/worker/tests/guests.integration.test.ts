@@ -92,14 +92,29 @@ describe("guest list APIs", () => {
     const vipBySam = await api("/api/guests?referee=Sam&ticketType=VIP", "PRIMARY_SCANNER");
     const body = await vipBySam.json() as { guests: Array<{ guestName: string; refereeName: string; ticketType: string }> };
     expect(body.guests).toEqual([
-      expect.objectContaining({ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "VIP" }),
       expect.objectContaining({ guestName: "Vera Void", refereeName: "Sam Rivera", ticketType: "VIP" }),
+      expect.objectContaining({ guestName: "Maya Chen", refereeName: "Sam Rivera", ticketType: "VIP" }),
     ]);
 
     const general = await api("/api/guests?ticketType=General%20admission", "SECONDARY_SCANNER");
     await expect(general.json()).resolves.toMatchObject({
       guests: [{ guestName: "Noah Williams", refereeName: "Alex Morgan" }],
     });
+  });
+
+  it("lists newest guests first, in plain and filtered views", async () => {
+    await seedGuests();
+    const all = await api("/api/guests", "PRIMARY_SCANNER");
+    const allBody = await all.json() as { guests: Array<{ guestName: string }> };
+    expect(allBody.guests.map((guest) => guest.guestName)).toEqual([
+      "Vera Void",
+      "Noah Williams",
+      "Maya Chen",
+    ]);
+
+    const bySam = await api("/api/guests?referee=Sam", "PRIMARY_SCANNER");
+    const samBody = await bySam.json() as { guests: Array<{ guestName: string }> };
+    expect(samBody.guests.map((guest) => guest.guestName)).toEqual(["Vera Void", "Maya Chen"]);
   });
 
   it("filters guests by authoritative check-in status", async () => {

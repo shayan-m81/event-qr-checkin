@@ -95,7 +95,7 @@ async function listGuests(request: Request, env: Env, session: Session): Promise
     FROM tickets
     LEFT JOIN checkins ON checkins.ticket_id = tickets.id
     ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
-    ORDER BY tickets.guest_name COLLATE NOCASE, tickets.id
+    ORDER BY tickets.created_at DESC, tickets.id DESC
     LIMIT ?
   `).bind(...bindings);
   const result = await statement.all<GuestRow>();
